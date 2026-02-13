@@ -29,6 +29,7 @@
     .group-pd { background: #e0f2fe !important; }
     .group-dp { background: #dcfce7 !important; }
     .group-gauss { background: #fef3c7 !important; }
+    .group-vsm { background: #ede9fe !important; }
 
     .result-table th, .result-table td { padding: 8px; text-align: right; }
     .result-table th:first-child, .result-table td:first-child { text-align: left; }
@@ -58,6 +59,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="pu">PU Calculator</button>
     <button class="tab-btn" data-tab="gauss">Gaussian FMS Analysis</button>
+    <button class="tab-btn" data-tab="vsm">Vector Sum Model</button>
   </div>
 
   <!-- ===== PU Calculator Tab ===== -->
@@ -149,6 +151,49 @@
       <div id="gaussCharts" class="chart-grid">No figures yet.</div>
     </div>
   </div><!-- end tab-gauss -->
+
+  <!-- ===== Vector Sum Model Tab ===== -->
+  <div id="tab-vsm" class="tab-panel">
+    <p class="small">Enter PU values (degrees) for each body tilt and visual background condition. Each row is one body tilt. The model fits vis1, vis2, vis3 (visual harmonic weights) and bod (body weight) with gravity fixed at 1.</p>
+
+    <div class="card">
+      <div class="controls">
+        <button id="vsmAddRows" class="btn-secondary" type="button">Add 10 Rows</button>
+        <button id="vsmClearGrid" class="btn-secondary" type="button">Clear Grid</button>
+        <button id="vsmRun" type="button">Fit Vector Sum Model</button>
+      </div>
+
+      <div class="grid-wrap">
+        <table class="input-grid">
+          <thead>
+            <tr>
+              <th class="group-vsm">Tilt</th>
+              <th class="group-vsm">PU grey</th>
+              <th class="group-vsm">PU room_0</th>
+              <th class="group-vsm">PU room_60</th>
+              <th class="group-vsm">PU room_120</th>
+              <th class="group-vsm">PU room_180</th>
+              <th class="group-vsm">PU room_240</th>
+              <th class="group-vsm">PU room_300</th>
+            </tr>
+          </thead>
+          <tbody id="vsmGridBody"></tbody>
+        </table>
+      </div>
+
+      <p id="vsmMessage" class="error"></p>
+    </div>
+
+    <div class="card">
+      <h3>Vector Sum Model Results</h3>
+      <div id="vsmResults">No results yet.</div>
+    </div>
+
+    <div class="card">
+      <h3>Predicted vs Actual</h3>
+      <div id="vsmCharts" class="chart-grid">No figures yet.</div>
+    </div>
+  </div><!-- end tab-vsm -->
 
   <script>
     const TOTAL_COLUMNS = 16;
@@ -815,6 +860,375 @@
     document.getElementById('gaussAddRows').addEventListener('click', () => gaussAddRows(10));
     document.getElementById('gaussClearGrid').addEventListener('click', gaussClearGrid);
     document.getElementById('gaussRun').addEventListener('click', runGaussianAnalysis);
+
+    /* ========== Vector Sum Model ========== */
+    const VSM_COLS = 8; // tilt + 7 backgrounds
+    const VSM_DEFAULT_ROWS = 20;
+    const VSM_VIS_ORIENTATIONS = [null, 0, 60, 120, 180, 240, 300]; // null = grey (no visual)
+    const VSM_BG_NAMES = ['grey', 'room_0', 'room_60', 'room_120', 'room_180', 'room_240', 'room_300'];
+    const DEG2RAD = Math.PI / 180;
+    const RAD2DEG = 180 / Math.PI;
+
+    function vsmCreateRow(rowIndex) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < VSM_COLS; c++) {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.row = String(rowIndex);
+        input.dataset.col = String(c);
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+      return tr;
+    }
+
+    function vsmAddRows(count) {
+      const body = document.getElementById('vsmGridBody');
+      const start = body.children.length;
+      for (let i = 0; i < count; i++) body.appendChild(vsmCreateRow(start + i));
+    }
+
+    function vsmClearGrid() {
+      document.querySelectorAll('#vsmGridBody input').forEach((input) => { input.value = ''; });
+    }
+
+    function vsmHandlePaste(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.closest('#vsmGridBody')) return;
+      const pasted = event.clipboardData?.getData('text');
+      if (!pasted) return;
+      event.preventDefault();
+
+      const rowStart = Number(target.dataset.row);
+      const colStart = Number(target.dataset.col);
+      const lines = pasted.replace(/\r/g, '').split('\n').filter((l) => l.length > 0);
+      const matrix = lines.map((l) => l.split('\t'));
+
+      const neededRows = rowStart + matrix.length;
+      const currentRows = document.querySelectorAll('#vsmGridBody tr').length;
+      if (neededRows > currentRows) vsmAddRows(neededRows - currentRows + 5);
+
+      matrix.forEach((cells, rOff) => {
+        cells.forEach((val, cOff) => {
+          const c = colStart + cOff;
+          if (c >= VSM_COLS) return;
+          const cell = document.querySelector(`#vsmGridBody input[data-row="${rowStart + rOff}"][data-col="${c}"]`);
+          if (cell) cell.value = val.trim();
+        });
+      });
+    }
+
+    function vsmCollectData() {
+      const rows = [...document.querySelectorAll('#vsmGridBody tr')];
+      const dataPoints = []; // [{tilt, visOrientation (null for grey), actualPU}]
+
+      rows.forEach((row) => {
+        const cells = [...row.querySelectorAll('input')];
+        if (cells.length < VSM_COLS) return;
+        const tilt = parseNumber(cells[0].value);
+        if (tilt === null) return;
+
+        for (let i = 0; i < 7; i++) {
+          const pu = parseNumber(cells[i + 1].value);
+          if (pu === null) continue;
+          dataPoints.push({ tilt, visIdx: i, visOrientation: VSM_VIS_ORIENTATIONS[i], actualPU: pu });
+        }
+      });
+
+      if (dataPoints.length < 4) throw new Error('Need at least 4 valid PU data points to fit 4 parameters.');
+      return dataPoints;
+    }
+
+    /* Predict PU using vector sum model */
+    function vsmPredict(tiltDeg, visDeg, vis1, vis2, vis3, bod) {
+      const g = 1;
+      const tilt = tiltDeg * DEG2RAD;
+      let vx = 0, vy = 0;
+
+      if (visDeg !== null) {
+        const v = visDeg * DEG2RAD;
+        vy = vis1 * Math.cos(v) + vis2 * Math.cos(2 * v) + vis3 * Math.cos(4 * v);
+        vx = vis1 * Math.sin(v) + vis2 * Math.sin(2 * v) + vis3 * Math.sin(4 * v);
+      }
+
+      const y = bod + vy + g * Math.cos(tilt);
+      const x = vx + g * Math.sin(tilt);
+      return Math.atan2(x, y) * RAD2DEG;
+    }
+
+    /* Angular difference handling wrapping */
+    function angleDiff(a, b) {
+      let d = a - b;
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      return d;
+    }
+
+    /* SSE for vector sum model */
+    function vsmSSE(dataPoints, vis1, vis2, vis3, bod) {
+      let err = 0;
+      for (const dp of dataPoints) {
+        const pred = vsmPredict(dp.tilt, dp.visOrientation, vis1, vis2, vis3, bod);
+        const d = angleDiff(pred, dp.actualPU);
+        err += d * d;
+      }
+      return err;
+    }
+
+    /* R² for vector sum model */
+    function vsmRSquared(dataPoints, vis1, vis2, vis3, bod) {
+      const meanPU = dataPoints.reduce((s, dp) => s + dp.actualPU, 0) / dataPoints.length;
+      let ssRes = 0, ssTot = 0;
+      for (const dp of dataPoints) {
+        const pred = vsmPredict(dp.tilt, dp.visOrientation, vis1, vis2, vis3, bod);
+        ssRes += angleDiff(pred, dp.actualPU) ** 2;
+        ssTot += angleDiff(dp.actualPU, meanPU) ** 2;
+      }
+      return ssTot === 0 ? NaN : 1 - ssRes / ssTot;
+    }
+
+    /* Fit the vector sum model using coarse grid search + hill climbing */
+    function fitVectorSum(dataPoints) {
+      let bestErr = Infinity;
+      let bestVis1 = 0, bestVis2 = 0, bestVis3 = 0, bestBod = 1;
+
+      // Coarse grid search
+      for (let vis1 = -1.5; vis1 <= 1.5; vis1 += 0.15) {
+        for (let vis2 = -0.8; vis2 <= 0.8; vis2 += 0.2) {
+          for (let vis3 = -0.5; vis3 <= 0.5; vis3 += 0.2) {
+            for (let bod = -1; bod <= 4; bod += 0.25) {
+              const err = vsmSSE(dataPoints, vis1, vis2, vis3, bod);
+              if (err < bestErr) {
+                bestErr = err;
+                bestVis1 = vis1;
+                bestVis2 = vis2;
+                bestVis3 = vis3;
+                bestBod = bod;
+              }
+            }
+          }
+        }
+      }
+
+      // Hill-climbing refinement
+      let step = 0.1;
+      while (step > 1e-5) {
+        let improved = false;
+        for (const d1 of [0, -step, step]) {
+          for (const d2 of [0, -step, step]) {
+            for (const d3 of [0, -step, step]) {
+              for (const db of [0, -step, step]) {
+                if (d1 === 0 && d2 === 0 && d3 === 0 && db === 0) continue;
+                const cV1 = bestVis1 + d1;
+                const cV2 = bestVis2 + d2;
+                const cV3 = bestVis3 + d3;
+                const cB = bestBod + db;
+                const err = vsmSSE(dataPoints, cV1, cV2, cV3, cB);
+                if (err < bestErr) {
+                  bestErr = err;
+                  bestVis1 = cV1;
+                  bestVis2 = cV2;
+                  bestVis3 = cV3;
+                  bestBod = cB;
+                  improved = true;
+                }
+              }
+            }
+          }
+        }
+        if (!improved) step /= 2;
+      }
+
+      const r2 = vsmRSquared(dataPoints, bestVis1, bestVis2, bestVis3, bestBod);
+      return { vis1: bestVis1, vis2: bestVis2, vis3: bestVis3, bod: bestBod, r2, sse: bestErr, n: dataPoints.length };
+    }
+
+    /* Draw predicted vs actual scatter plot */
+    function drawVsmChart(canvas, dataPoints, fit) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width;
+      const H = canvas.height;
+      const pad = { top: 30, right: 20, bottom: 50, left: 60 };
+      const plotW = W - pad.left - pad.right;
+      const plotH = H - pad.top - pad.bottom;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+
+      const actuals = dataPoints.map((dp) => dp.actualPU);
+      const predicteds = dataPoints.map((dp) => vsmPredict(dp.tilt, dp.visOrientation, fit.vis1, fit.vis2, fit.vis3, fit.bod));
+      const all = actuals.concat(predicteds);
+      const dMin = Math.min(...all) - 5;
+      const dMax = Math.max(...all) + 5;
+
+      function toX(v) { return pad.left + ((v - dMin) / (dMax - dMin)) * plotW; }
+      function toY(v) { return pad.top + plotH - ((v - dMin) / (dMax - dMin)) * plotH; }
+
+      // Grid lines
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 1;
+      const ticks = 6;
+      for (let i = 0; i <= ticks; i++) {
+        const v = dMin + (dMax - dMin) * (i / ticks);
+        ctx.beginPath(); ctx.moveTo(pad.left, toY(v)); ctx.lineTo(W - pad.right, toY(v)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(toX(v), pad.top); ctx.lineTo(toX(v), pad.top + plotH); ctx.stroke();
+      }
+
+      // Axes
+      ctx.strokeStyle = '#374151';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, pad.top + plotH);
+      ctx.lineTo(W - pad.right, pad.top + plotH);
+      ctx.stroke();
+
+      // Identity line (perfect fit)
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(toX(dMin), toY(dMin));
+      ctx.lineTo(toX(dMax), toY(dMax));
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Axis labels
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= ticks; i++) {
+        const v = dMin + (dMax - dMin) * (i / ticks);
+        ctx.fillText(v.toFixed(1), toX(v), pad.top + plotH + 18);
+      }
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= ticks; i++) {
+        const v = dMin + (dMax - dMin) * (i / ticks);
+        ctx.fillText(v.toFixed(1), pad.left - 8, toY(v) + 4);
+      }
+
+      // Axis titles
+      ctx.font = '13px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Actual PU (°)', pad.left + plotW / 2, H - 5);
+      ctx.save();
+      ctx.translate(15, pad.top + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('Predicted PU (°)', 0, 0);
+      ctx.restore();
+
+      // Color per background
+      const bgColors = ['#6b7280', '#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777'];
+
+      // Data points
+      dataPoints.forEach((dp, i) => {
+        const actual = dp.actualPU;
+        const pred = predicteds[i];
+        ctx.fillStyle = bgColors[dp.visIdx];
+        ctx.beginPath();
+        ctx.arc(toX(actual), toY(pred), 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Title
+      ctx.fillStyle = '#111827';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Predicted vs Actual PU', W / 2, 18);
+
+      // Fit info
+      ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillStyle = '#6b7280';
+      ctx.textAlign = 'left';
+      ctx.fillText(`R²=${fit.r2.toFixed(4)}  vis1=${fit.vis1.toFixed(4)}  vis2=${fit.vis2.toFixed(4)}  vis3=${fit.vis3.toFixed(4)}  bod=${fit.bod.toFixed(4)}`, pad.left + 5, pad.top + 15);
+
+      // Legend
+      const legendY = pad.top + 30;
+      VSM_BG_NAMES.forEach((name, i) => {
+        ctx.fillStyle = bgColors[i];
+        ctx.beginPath();
+        ctx.arc(pad.left + 12, legendY + i * 16, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#374151';
+        ctx.font = '11px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(name, pad.left + 22, legendY + i * 16 + 4);
+      });
+    }
+
+    function runVectorSumModel() {
+      const msg = document.getElementById('vsmMessage');
+      const resultsDiv = document.getElementById('vsmResults');
+      const chartsDiv = document.getElementById('vsmCharts');
+      msg.textContent = '';
+
+      try {
+        const dataPoints = vsmCollectData();
+        const fit = fitVectorSum(dataPoints);
+
+        // Build results table: parameters
+        const paramsHTML = renderBlock('Fitted Parameters (g = 1.0 fixed)', ['Value'], [
+          { label: 'vis1 (1st harmonic)', values: [fit.vis1.toFixed(6)] },
+          { label: 'vis2 (2nd harmonic)', values: [fit.vis2.toFixed(6)] },
+          { label: 'vis3 (4th harmonic)', values: [fit.vis3.toFixed(6)] },
+          { label: 'bod (body weight)', values: [fit.bod.toFixed(6)] },
+          { label: 'R²', values: [fit.r2.toFixed(6)] },
+          { label: 'SSE', values: [fit.sse.toFixed(6)] },
+          { label: 'n', values: [String(fit.n)] },
+        ]);
+
+        // Build predicted vs actual table grouped by tilt
+        const tilts = [...new Set(dataPoints.map((dp) => dp.tilt))].sort((a, b) => a - b);
+        const predRows = [];
+        for (const tilt of tilts) {
+          const tiltPts = dataPoints.filter((dp) => dp.tilt === tilt);
+          const actualVals = [];
+          const predVals = [];
+          const bgLabels = [];
+          for (const dp of tiltPts) {
+            const pred = vsmPredict(dp.tilt, dp.visOrientation, fit.vis1, fit.vis2, fit.vis3, fit.bod);
+            bgLabels.push(VSM_BG_NAMES[dp.visIdx]);
+            actualVals.push(dp.actualPU.toFixed(2));
+            predVals.push(pred.toFixed(2));
+          }
+          predRows.push({ tilt, bgLabels, actualVals, predVals });
+        }
+
+        // Render comparison table
+        let compHTML = '<div class="result-block"><h4>Predicted vs Actual PU (°)</h4><table class="result-table"><thead><tr><th>Tilt</th><th>Background</th><th>Actual</th><th>Predicted</th><th>Error</th></tr></thead><tbody>';
+        const copyLines = ['Tilt\tBackground\tActual\tPredicted\tError'];
+        for (const pr of predRows) {
+          for (let i = 0; i < pr.bgLabels.length; i++) {
+            const err = (parseFloat(pr.predVals[i]) - parseFloat(pr.actualVals[i])).toFixed(2);
+            compHTML += `<tr><td>${pr.tilt}</td><td>${pr.bgLabels[i]}</td><td>${pr.actualVals[i]}</td><td>${pr.predVals[i]}</td><td>${err}</td></tr>`;
+            copyLines.push(`${pr.tilt}\t${pr.bgLabels[i]}\t${pr.actualVals[i]}\t${pr.predVals[i]}\t${err}`);
+          }
+        }
+        compHTML += '</tbody></table>';
+        compHTML += `<textarea class="copy-area" readonly>${copyLines.join('\n')}</textarea>`;
+        compHTML += '</div>';
+
+        resultsDiv.innerHTML = `<div class="result-grid">${paramsHTML}${compHTML}</div>`;
+
+        // Draw chart
+        chartsDiv.innerHTML = '<div class="chart-card"><h4>Predicted vs Actual PU</h4><canvas id="vsmCanvas" width="520" height="420"></canvas></div>';
+        const canvas = document.getElementById('vsmCanvas');
+        if (canvas) drawVsmChart(canvas, dataPoints, fit);
+
+      } catch (error) {
+        resultsDiv.textContent = 'No results yet.';
+        chartsDiv.textContent = 'No figures yet.';
+        msg.textContent = error.message;
+      }
+    }
+
+    vsmAddRows(VSM_DEFAULT_ROWS);
+    document.getElementById('vsmGridBody').addEventListener('paste', vsmHandlePaste);
+    document.getElementById('vsmAddRows').addEventListener('click', () => vsmAddRows(10));
+    document.getElementById('vsmClearGrid').addEventListener('click', vsmClearGrid);
+    document.getElementById('vsmRun').addEventListener('click', runVectorSumModel);
   </script>
 </body>
 </html>
