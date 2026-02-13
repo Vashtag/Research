@@ -3,47 +3,110 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sigmoid Batch Fitter</title>
+  <title>Sigmoid PU Calculator</title>
   <style>
     :root { font-family: Arial, sans-serif; }
     body { margin: 24px; color: #1f2937; background: #f8fafc; }
     h1 { margin-bottom: 8px; }
     .card { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 16px; }
-    textarea { width: 100%; min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-    label { font-weight: 600; margin-right: 8px; }
-    select, button { padding: 8px 10px; margin-right: 10px; }
-    button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
-    button:hover { background: #1d4ed8; }
-    .error { color: #b91c1c; font-weight: 600; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #d1d5db; padding: 8px; text-align: right; }
-    th:first-child, td:first-child { text-align: left; }
     .small { font-size: 12px; color: #6b7280; }
+    .controls { margin: 10px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button { padding: 8px 10px; border: none; border-radius: 6px; cursor: pointer; color: #fff; background: #2563eb; }
+    button:hover { background: #1d4ed8; }
+    .btn-secondary { background: #4b5563; }
+    .btn-secondary:hover { background: #374151; }
+    .error { color: #b91c1c; font-weight: 600; min-height: 20px; }
+
+    .grid-wrap { overflow: auto; border: 1px solid #d1d5db; border-radius: 8px; max-height: 430px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #d1d5db; padding: 0; }
+    .input-grid th { background: #f3f4f6; position: sticky; top: 0; z-index: 2; }
+    .input-grid input {
+      width: 100%; border: none; padding: 7px; box-sizing: border-box;
+      font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .input-grid input:focus { outline: 2px solid #93c5fd; outline-offset: -2px; }
+    .group-pd { background: #e0f2fe !important; }
+    .group-dp { background: #dcfce7 !important; }
+
+    .result-table th, .result-table td { padding: 8px; text-align: right; }
+    .result-table th:first-child, .result-table td:first-child { text-align: left; }
   </style>
 </head>
 <body>
-  <h1>3-Parameter Sigmoid Batch Fitter</h1>
-  <p class="small">Paste an 8-column table (tab-separated): first column is x, next columns are series to fit. Missing cells can be blank.</p>
+  <h1>Pre-VR Upright PU Calculator</h1>
+  <p class="small">Paste all 16 columns directly from Excel. Left block is p-d (x + 7 columns), right block is d-p (x + 7 columns).</p>
 
   <div class="card">
-    <textarea id="dataInput" placeholder="Paste your table here..."></textarea>
-    <div style="margin-top: 10px;">
-      <label for="mode">Direction:</label>
-      <select id="mode">
-        <option value="p-d">p-d (constraint: b &lt; 1)</option>
-        <option value="d-p">d-p (constraint: b &gt; 0)</option>
-      </select>
-      <button id="runFit">Run Fit</button>
+    <div class="controls">
+      <button id="addRows" class="btn-secondary" type="button">Add 10 Rows</button>
+      <button id="clearGrid" class="btn-secondary" type="button">Clear Grid</button>
+      <button id="runCalc" type="button">Calculate PU</button>
     </div>
+
+    <div class="grid-wrap">
+      <table class="input-grid">
+        <thead>
+          <tr>
+            <th class="group-pd"><input data-header="0" value="p-d_x"></th>
+            <th class="group-pd"><input data-header="1" value="p-d_grey"></th>
+            <th class="group-pd"><input data-header="2" value="p-d_room_0"></th>
+            <th class="group-pd"><input data-header="3" value="p-d_room_60"></th>
+            <th class="group-pd"><input data-header="4" value="p-d_room_120"></th>
+            <th class="group-pd"><input data-header="5" value="p-d_room_180"></th>
+            <th class="group-pd"><input data-header="6" value="p-d_room_240"></th>
+            <th class="group-pd"><input data-header="7" value="p-d_room_300"></th>
+            <th class="group-dp"><input data-header="8" value="d-p_x"></th>
+            <th class="group-dp"><input data-header="9" value="d-p_grey"></th>
+            <th class="group-dp"><input data-header="10" value="d-p_room_0"></th>
+            <th class="group-dp"><input data-header="11" value="d-p_room_60"></th>
+            <th class="group-dp"><input data-header="12" value="d-p_room_120"></th>
+            <th class="group-dp"><input data-header="13" value="d-p_room_180"></th>
+            <th class="group-dp"><input data-header="14" value="d-p_room_240"></th>
+            <th class="group-dp"><input data-header="15" value="d-p_room_300"></th>
+          </tr>
+        </thead>
+        <tbody id="gridBody"></tbody>
+      </table>
+    </div>
+
     <p id="message" class="error"></p>
   </div>
 
   <div class="card">
-    <h3>Results</h3>
+    <h3>Results (p-d, d-p, and PU)</h3>
     <div id="results">No results yet.</div>
+    <p class="small">PU formulas used: <strong>b(PU) = (|b(p-d)| + |b(d-p)|)/2</strong>, <strong>x0(PU) = ((x0(p-d) + x0(d-p))/2) - 180</strong>.</p>
   </div>
 
   <script>
+    const TOTAL_COLUMNS = 16;
+    const DEFAULT_ROWS = 45;
+
+    function createRow(rowIndex) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < TOTAL_COLUMNS; c += 1) {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.row = String(rowIndex);
+        input.dataset.col = String(c);
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+      return tr;
+    }
+
+    function addRows(count) {
+      const body = document.getElementById('gridBody');
+      const start = body.children.length;
+      for (let i = 0; i < count; i += 1) body.appendChild(createRow(start + i));
+    }
+
+    function clearGrid() {
+      document.querySelectorAll('#gridBody input').forEach((input) => { input.value = ''; });
+    }
+
     function parseNumber(value) {
       const cleaned = value.trim();
       if (!cleaned) return null;
@@ -51,33 +114,71 @@
       return Number.isFinite(n) ? n : null;
     }
 
-    function parseData(raw) {
-      const lines = raw.replace(/\r/g, '').split('\n').filter((line) => line.trim().length > 0);
-      if (lines.length < 2) throw new Error('Need a header row and at least one data row.');
+    function headerNames() {
+      const headers = [];
+      document.querySelectorAll('thead input[data-header]').forEach((input, idx) => {
+        headers.push(input.value.trim() || `col_${idx + 1}`);
+      });
+      return headers;
+    }
 
-      const delimiter = lines[0].includes('\t') ? '\t' : ',';
-      const rows = lines.map((line) => line.split(delimiter));
-      const headers = rows[0].slice(0, 8).map((h, i) => (h.trim() || `col_${i + 1}`));
+    function collectData() {
+      const headers = headerNames();
+      const rows = [...document.querySelectorAll('#gridBody tr')];
 
-      if (headers.length < 8) throw new Error('Expected 8 columns (x + 7 data columns).');
+      const pdX = [];
+      const dpX = [];
+      const pdSeries = Array.from({ length: 7 }, () => []);
+      const dpSeries = Array.from({ length: 7 }, () => []);
 
-      const xValues = [];
-      const series = headers.slice(1).map(() => []);
+      rows.forEach((row) => {
+        const cells = [...row.querySelectorAll('input')];
+        if (cells.length < TOTAL_COLUMNS) return;
 
-      for (let r = 1; r < rows.length; r += 1) {
-        const cols = rows[r];
-        const x = parseNumber(cols[0] || '');
-        if (x === null) continue;
-        xValues.push(x);
-        for (let c = 1; c < 8; c += 1) {
-          const y = parseNumber(cols[c] || '');
-          series[c - 1].push(y);
+        const xPd = parseNumber(cells[0].value);
+        if (xPd !== null) {
+          pdX.push(xPd);
+          for (let i = 0; i < 7; i += 1) pdSeries[i].push(parseNumber(cells[i + 1].value));
         }
-      }
 
-      if (xValues.length === 0) throw new Error('No valid x values found in first column.');
+        const xDp = parseNumber(cells[8].value);
+        if (xDp !== null) {
+          dpX.push(xDp);
+          for (let i = 0; i < 7; i += 1) dpSeries[i].push(parseNumber(cells[i + 9].value));
+        }
+      });
 
-      return { headers, xValues, series };
+      if (pdX.length === 0 && dpX.length === 0) throw new Error('No valid x values found in the p-d or d-p x columns.');
+
+      return { headers, pdX, pdSeries, dpX, dpSeries };
+    }
+
+    function handleGridPaste(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.closest('#gridBody')) return;
+
+      const pasted = event.clipboardData?.getData('text');
+      if (!pasted) return;
+      event.preventDefault();
+
+      const rowStart = Number(target.dataset.row);
+      const colStart = Number(target.dataset.col);
+      const lines = pasted.replace(/\r/g, '').split('\n').filter((line) => line.length > 0);
+      const matrix = lines.map((line) => line.split('\t'));
+
+      const neededRows = rowStart + matrix.length;
+      const currentRows = document.querySelectorAll('#gridBody tr').length;
+      if (neededRows > currentRows) addRows(neededRows - currentRows + 5);
+
+      matrix.forEach((cells, rOffset) => {
+        const r = rowStart + rOffset;
+        cells.forEach((value, cOffset) => {
+          const c = colStart + cOffset;
+          if (c >= TOTAL_COLUMNS) return;
+          const cell = document.querySelector(`#gridBody input[data-row="${r}"][data-col="${c}"]`);
+          if (cell) cell.value = value.trim();
+        });
+      });
     }
 
     function sigmoid(x, b, x0) {
@@ -97,7 +198,7 @@
     }
 
     function rSquared(data, b, x0) {
-      const meanY = data.reduce((s, [, y]) => s + y, 0) / data.length;
+      const meanY = data.reduce((sum, [, y]) => sum + y, 0) / data.length;
       let ssRes = 0;
       let ssTot = 0;
       for (const [x, y] of data) {
@@ -109,24 +210,24 @@
       return 1 - (ssRes / ssTot);
     }
 
-    function fitColumn(data, mode) {
+    function fitColumn(data, direction) {
       const xs = data.map(([x]) => x);
       const minX = Math.min(...xs);
       const maxX = Math.max(...xs);
 
       let bestErr = Infinity;
-      let bestB = mode === 'd-p' ? 1 : -1;
+      let bestB = direction === 'dp' ? 1 : -1;
       let bestX0 = 0;
 
-      const bMin = mode === 'd-p' ? 0.05 : -200;
-      const bMax = mode === 'd-p' ? 200 : 0.95;
+      const bMin = direction === 'dp' ? 0.05 : -200;
+      const bMax = direction === 'dp' ? 200 : 0.95;
       const x0Min = Math.floor(minX - 100);
       const x0Max = Math.ceil(maxX + 100);
 
       for (let b = bMin; b <= bMax; b += 0.5) {
         if (Math.abs(b) < 1e-9) continue;
-        if (mode === 'p-d' && !(b < 1)) continue;
-        if (mode === 'd-p' && !(b > 0)) continue;
+        if (direction === 'pd' && !(b < 1)) continue;
+        if (direction === 'dp' && !(b > 0)) continue;
 
         for (let x0 = x0Min; x0 <= x0Max; x0 += 1) {
           const err = sse(data, b, x0);
@@ -140,95 +241,115 @@
 
       let stepB = 5;
       let stepX0 = 5;
-
       while (stepB > 1e-4) {
         let improved = false;
         for (const db of [0, -stepB, stepB]) {
           for (const dx of [0, -stepX0, stepX0]) {
-            const candidateB = bestB + db;
-            if (Math.abs(candidateB) < 1e-9) continue;
-            if (mode === 'p-d' && !(candidateB < 1)) continue;
-            if (mode === 'd-p' && !(candidateB > 0)) continue;
-
-            const candidateX0 = bestX0 + dx;
-            const err = sse(data, candidateB, candidateX0);
+            const candB = bestB + db;
+            if (Math.abs(candB) < 1e-9) continue;
+            if (direction === 'pd' && !(candB < 1)) continue;
+            if (direction === 'dp' && !(candB > 0)) continue;
+            const candX0 = bestX0 + dx;
+            const err = sse(data, candB, candX0);
             if (err < bestErr) {
               bestErr = err;
-              bestB = candidateB;
-              bestX0 = candidateX0;
+              bestB = candB;
+              bestX0 = candX0;
               improved = true;
             }
           }
         }
-
         if (!improved) {
           stepB /= 2;
           stepX0 /= 2;
         }
       }
 
-      return { b: bestB, x0: bestX0, sse: bestErr, r2: rSquared(data, bestB, bestX0), n: data.length };
+      return { b: bestB, x0: bestX0, r2: rSquared(data, bestB, bestX0), sse: bestErr, n: data.length };
     }
 
-    function renderTable(headers, rows) {
-      const tableRows = rows.map((row) => `
+    function renderResults(rows) {
+      const htmlRows = rows.map((row) => `
         <tr>
           <td>${row.name}</td>
-          <td>${row.b.toFixed(6)}</td>
-          <td>${row.x0.toFixed(6)}</td>
-          <td>${Number.isFinite(row.r2) ? row.r2.toFixed(6) : 'NaN'}</td>
-          <td>${row.sse.toFixed(6)}</td>
-          <td>${row.n}</td>
+          <td>${row.pdB}</td><td>${row.pdX0}</td><td>${row.pdR2}</td>
+          <td>${row.dpB}</td><td>${row.dpX0}</td><td>${row.dpR2}</td>
+          <td>${row.puB}</td><td>${row.puX0}</td>
         </tr>
       `).join('');
 
       return `
-        <table>
+        <table class="result-table">
           <thead>
             <tr>
               <th>Column</th>
-              <th>b</th>
-              <th>x0</th>
-              <th>R²</th>
-              <th>SSE</th>
-              <th>n</th>
+              <th>p-d b</th><th>p-d x0</th><th>p-d R²</th>
+              <th>d-p b</th><th>d-p x0</th><th>d-p R²</th>
+              <th>PU b</th><th>PU x0</th>
             </tr>
           </thead>
-          <tbody>${tableRows}</tbody>
+          <tbody>${htmlRows}</tbody>
         </table>
       `;
     }
 
-    document.getElementById('runFit').addEventListener('click', () => {
-      const message = document.getElementById('message');
+    function toFmt(v) {
+      return Number.isFinite(v) ? v.toFixed(4) : 'NaN';
+    }
+
+    function runCalculation() {
+      const msg = document.getElementById('message');
       const resultsDiv = document.getElementById('results');
-      message.textContent = '';
+      msg.textContent = '';
 
       try {
-        const { headers, xValues, series } = parseData(document.getElementById('dataInput').value);
-        const mode = document.getElementById('mode').value;
+        const { headers, pdX, pdSeries, dpX, dpSeries } = collectData();
+        const rows = [];
 
-        const results = [];
-        for (let i = 0; i < series.length; i += 1) {
-          const points = [];
-          for (let r = 0; r < xValues.length; r += 1) {
-            const y = series[i][r];
-            if (y !== null) points.push([xValues[r], y]);
+        for (let i = 0; i < 7; i += 1) {
+          const pdPoints = [];
+          for (let r = 0; r < pdX.length; r += 1) {
+            const y = pdSeries[i][r];
+            if (y !== null) pdPoints.push([pdX[r], y]);
           }
 
-          if (points.length < 3) {
-            results.push({ name: headers[i + 1], b: NaN, x0: NaN, r2: NaN, sse: NaN, n: points.length });
-          } else {
-            results.push({ name: headers[i + 1], ...fitColumn(points, mode) });
+          const dpPoints = [];
+          for (let r = 0; r < dpX.length; r += 1) {
+            const y = dpSeries[i][r];
+            if (y !== null) dpPoints.push([dpX[r], y]);
           }
+
+          const pdFit = pdPoints.length >= 3 ? fitColumn(pdPoints, 'pd') : null;
+          const dpFit = dpPoints.length >= 3 ? fitColumn(dpPoints, 'dp') : null;
+
+          const puB = (pdFit && dpFit) ? (Math.abs(pdFit.b) + Math.abs(dpFit.b)) / 2 : NaN;
+          const puX0 = (pdFit && dpFit) ? ((pdFit.x0 + dpFit.x0) / 2) - 180 : NaN;
+
+          rows.push({
+            name: headers[i + 1].replace(/^p-d_/, ''),
+            pdB: toFmt(pdFit?.b),
+            pdX0: toFmt(pdFit?.x0),
+            pdR2: toFmt(pdFit?.r2),
+            dpB: toFmt(dpFit?.b),
+            dpX0: toFmt(dpFit?.x0),
+            dpR2: toFmt(dpFit?.r2),
+            puB: toFmt(puB),
+            puX0: toFmt(puX0),
+          });
         }
 
-        resultsDiv.innerHTML = renderTable(headers, results);
+        resultsDiv.innerHTML = renderResults(rows);
       } catch (error) {
         resultsDiv.textContent = 'No results yet.';
-        message.textContent = error.message;
+        msg.textContent = error.message;
       }
-    });
+    }
+
+    addRows(DEFAULT_ROWS);
+    document.getElementById('gridBody').addEventListener('paste', handleGridPaste);
+    document.getElementById('addRows').addEventListener('click', () => addRows(10));
+    document.getElementById('clearGrid').addEventListener('click', clearGrid);
+    document.getElementById('runCalc').addEventListener('click', runCalculation);
   </script>
 </body>
 </html>

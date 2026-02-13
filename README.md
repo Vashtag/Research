@@ -1,31 +1,42 @@
-# Sigmoid Batch Fitter (GitHub Pages app)
+# Sigmoid PU Calculator (GitHub Pages app)
 
-This repository includes a browser app (`index.html`) that fits your pasted 8-column table using:
+This app accepts **16 columns** of pasted spreadsheet data:
+
+- **p-d block**: `x + 7 columns`
+- **d-p block**: `x + 7 columns`
+
+It performs sigmoid fits per column (grey, room_0, room_60, room_120, room_180, room_240, room_300) and computes PU.
+
+## Model and constraints
+
+Sigmoid model:
 
 \[
 f(x) = \frac{1}{1 + e^{-((x-x0)/b)}}
 \]
-with `a = 1`.
 
-## Modes
+Per direction:
+- p-d fit uses `b < 1`
+- d-p fit uses `b > 0`
 
-- **p-d**: constraint `b < 1`
-- **d-p**: constraint `b > 0`
+## PU formulas
 
-The app reports per column (2..8) versus column 1:
-- `b`
-- `x0`
-- `R²`
-- `SSE`
-- `n`
+Using your spreadsheet logic:
+- `b(PU) = (|b(p-d)| + |b(d-p)|) / 2`
+- `x0(PU) = ((x0(p-d) + x0(d-p)) / 2) - 180`
 
-## Input format
+## Input UX
 
-Paste tab-separated values exactly like your spreadsheet:
-- 8 columns total
-- first column is `x`
-- next 7 columns are response columns
-- blank cells are treated as missing values
+- Uses an Excel-like editable grid (16 columns) to prevent paste shifting.
+- Paste directly from Excel/Sheets into any starting cell.
+- Grid auto-adds rows if your pasted block is larger than the current size.
+
+## Outputs
+
+For each of the 7 channels, the app reports:
+- p-d: `b`, `x0`, `R²`
+- d-p: `b`, `x0`, `R²`
+- PU: `b`, `x0`
 
 ## Run locally
 
@@ -33,13 +44,11 @@ Paste tab-separated values exactly like your spreadsheet:
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`.
+Open `http://localhost:8000`.
 
 ## Deploy on GitHub Pages
 
 1. Push this repo to GitHub.
 2. Go to **Settings → Pages**.
-3. Under **Build and deployment**, choose:
-   - Source: **Deploy from a branch**
-   - Branch: your default branch, folder `/ (root)`
-4. Save. GitHub will publish `index.html` as your app.
+3. Select **Deploy from a branch** and choose your default branch at `/ (root)`.
+4. Save.
