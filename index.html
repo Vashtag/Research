@@ -1,1 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sigmoid Batch Fitter</title>
+  <style>
+    :root { font-family: Arial, sans-serif; }
+    body { margin: 24px; color: #1f2937; background: #f8fafc; }
+    h1 { margin-bottom: 8px; }
+    .card { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 16px; }
+    .small { font-size: 12px; color: #6b7280; }
+    .controls { margin: 10px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    label { font-weight: 600; }
+    select, button { padding: 8px 10px; }
+    button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .btn-secondary { background: #4b5563; }
+    .btn-secondary:hover { background: #374151; }
+    .error { color: #b91c1c; font-weight: 600; min-height: 20px; }
 
+    .grid-wrap { overflow: auto; border: 1px solid #d1d5db; border-radius: 8px; max-height: 420px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #d1d5db; padding: 0; }
+    .input-grid th { background: #f3f4f6; position: sticky; top: 0; z-index: 2; }
+    .input-grid input {
+      width: 100%;
+      border: none;
+      padding: 8px;
+      box-sizing: border-box;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .input-grid input:focus { outline: 2px solid #93c5fd; outline-offset: -2px; }
+
+    .result-table th, .result-table td { padding: 8px; text-align: right; }
+    .result-table th:first-child, .result-table td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>3-Parameter Sigmoid Batch Fitter</h1>
+  <p class="small">Paste your spreadsheet directly into the grid below (8 columns). This keeps rows/columns aligned like Excel.</p>
+
+  <div class="card">
+    <div class="controls">
+      <button id="addRows" class="btn-secondary" type="button">Add 10 Rows</button>
+      <button id="clearGrid" class="btn-secondary" type="button">Clear Grid</button>
+    </div>
+
+    <div class="grid-wrap">
+      <table class="input-grid" id="inputGrid">
+        <thead>
+          <tr>
+            <th><input data-header="1" value="x" /></th>
+            <th><input data-header="2" value="4-grey" /></th>
+            <th><input data-header="3" value="5-room_0" /></th>
+            <th><input data-header="4" value="6-room_60" /></th>
+            <th><input data-header="5" value="7-room_120" /></th>
+            <th><input data-header="6" value="8-room_180" /></th>
+            <th><input data-header="7" value="9-room_240" /></th>
+            <th><input data-header="8" value="10-room_300" /></th>
+          </tr>
+        </thead>
+        <tbody id="gridBody"></tbody>
+      </table>
+    </div>
+
+    <div class="controls">
+      <label for="mode">Direction:</label>
+      <select id="mode">
+        <option value="p-d">p-d (constraint: b &lt; 1)</option>
+        <option value="d-p">d-p (constraint: b &gt; 0)</option>
+      </select>
+      <button id="runFit" type="button">Run Fit</button>
+    </div>
+
+    <p id="message" class="error"></p>
+  </div>
+
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet.</div>
+  </div>
+
+  <script>
+    const TOTAL_COLUMNS = 8;
+    const DEFAULT_ROWS = 35;
+
+    function createRow(rowIndex) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < TOTAL_COLUMNS; c += 1) {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.row = String(rowIndex);
+        input.dataset.col = String(c);
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+      return tr;
+    }
+
+    function addRows(count) {
+      const body = document.getElementById('gridBody');
+      const start = body.children.length;
+      for (let i = 0; i < count; i += 1) {
+        body.appendChild(createRow(start + i));
+      }
+    }
+
+    function clearGrid() {
+      document.querySelectorAll('#gridBody input').forEach((input) => {
+        input.value = '';
+      });
+    }
+
+    function parseNumber(value) {
+      const cleaned = value.trim();
+      if (!cleaned) return null;
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function getHeaders() {
+      const headers = [];
+      document.querySelectorAll('thead input[data-header]').forEach((input, idx) => {
+        headers.push(input.value.trim() || `col_${idx + 1}`);
+      });
+      return headers;
+    }
+
+    function collectDataFromGrid() {
+      const headers = getHeaders();
+      const rows = [...document.querySelectorAll('#gridBody tr')];
+
+      const xValues = [];
+      const series = Array.from({ length: TOTAL_COLUMNS - 1 }, () => []);
+
+      rows.forEach((row) => {
+        const cells = [...row.querySelectorAll('input')];
+        if (cells.length < TOTAL_COLUMNS) return;
+
+        const x = parseNumber(cells[0].value);
+        if (x === null) return;
+
+        xValues.push(x);
+        for (let c = 1; c < TOTAL_COLUMNS; c += 1) {
+          series[c - 1].push(parseNumber(cells[c].value));
+        }
+      });
+
+      if (xValues.length === 0) {
+        throw new Error('No valid x values found in column 1.');
+      }
+
+      return { headers, xValues, series };
+    }
+
+    function handleGridPaste(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.closest('#gridBody')) return;
+
+      const pasted = event.clipboardData?.getData('text');
+      if (!pasted) return;
+
+      event.preventDefault();
+      const rowStart = Number(target.dataset.row);
+      const colStart = Number(target.dataset.col);
+
+      const lines = pasted.replace(/\r/g, '').split('\n').filter((line) => line.length > 0);
+      const matrix = lines.map((line) => line.split('\t'));
+
+      const neededRows = rowStart + matrix.length;
+      const currentRows = document.querySelectorAll('#gridBody tr').length;
+      if (neededRows > currentRows) {
+        addRows(neededRows - currentRows + 5);
+      }
+
+      matrix.forEach((cells, rOffset) => {
+        const r = rowStart + rOffset;
+        cells.forEach((value, cOffset) => {
+          const c = colStart + cOffset;
+          if (c >= TOTAL_COLUMNS) return;
+          const selector = `#gridBody input[data-row="${r}"][data-col="${c}"]`;
+          const cell = document.querySelector(selector);
+          if (cell) cell.value = value.trim();
+        });
+      });
+    }
+
+    function sigmoid(x, b, x0) {
+      const z = -(x - x0) / b;
+      if (z > 60) return 0;
+      if (z < -60) return 1;
+      return 1 / (1 + Math.exp(z));
+    }
+
+    function sse(data, b, x0) {
+      let err = 0;
+      for (const [x, y] of data) {
+        const d = sigmoid(x, b, x0) - y;
+        err += d * d;
+      }
+      return err;
+    }
+
+    function rSquared(data, b, x0) {
+      const meanY = data.reduce((s, [, y]) => s + y, 0) / data.length;
+      let ssRes = 0;
+      let ssTot = 0;
+      for (const [x, y] of data) {
+        const pred = sigmoid(x, b, x0);
+        ssRes += (y - pred) ** 2;
+        ssTot += (y - meanY) ** 2;
+      }
+      if (ssTot === 0) return NaN;
+      return 1 - (ssRes / ssTot);
+    }
+
+    function fitColumn(data, mode) {
+      const xs = data.map(([x]) => x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+
+      let bestErr = Infinity;
+      let bestB = mode === 'd-p' ? 1 : -1;
+      let bestX0 = 0;
+
+      const bMin = mode === 'd-p' ? 0.05 : -200;
+      const bMax = mode === 'd-p' ? 200 : 0.95;
+      const x0Min = Math.floor(minX - 100);
+      const x0Max = Math.ceil(maxX + 100);
+
+      for (let b = bMin; b <= bMax; b += 0.5) {
+        if (Math.abs(b) < 1e-9) continue;
+        if (mode === 'p-d' && !(b < 1)) continue;
+        if (mode === 'd-p' && !(b > 0)) continue;
+
+        for (let x0 = x0Min; x0 <= x0Max; x0 += 1) {
+          const err = sse(data, b, x0);
+          if (err < bestErr) {
+            bestErr = err;
+            bestB = b;
+            bestX0 = x0;
+          }
+        }
+      }
+
+      let stepB = 5;
+      let stepX0 = 5;
+
+      while (stepB > 1e-4) {
+        let improved = false;
+        for (const db of [0, -stepB, stepB]) {
+          for (const dx of [0, -stepX0, stepX0]) {
+            const candidateB = bestB + db;
+            if (Math.abs(candidateB) < 1e-9) continue;
+            if (mode === 'p-d' && !(candidateB < 1)) continue;
+            if (mode === 'd-p' && !(candidateB > 0)) continue;
+
+            const candidateX0 = bestX0 + dx;
+            const err = sse(data, candidateB, candidateX0);
+            if (err < bestErr) {
+              bestErr = err;
+              bestB = candidateB;
+              bestX0 = candidateX0;
+              improved = true;
+            }
+          }
+        }
+
+        if (!improved) {
+          stepB /= 2;
+          stepX0 /= 2;
+        }
+      }
+
+      return { b: bestB, x0: bestX0, sse: bestErr, r2: rSquared(data, bestB, bestX0), n: data.length };
+    }
+
+    function renderTable(rows) {
+      const tableRows = rows.map((row) => `
+        <tr>
+          <td>${row.name}</td>
+          <td>${Number.isFinite(row.b) ? row.b.toFixed(6) : 'NaN'}</td>
+          <td>${Number.isFinite(row.x0) ? row.x0.toFixed(6) : 'NaN'}</td>
+          <td>${Number.isFinite(row.r2) ? row.r2.toFixed(6) : 'NaN'}</td>
+          <td>${Number.isFinite(row.sse) ? row.sse.toFixed(6) : 'NaN'}</td>
+          <td>${row.n}</td>
+        </tr>
+      `).join('');
+
+      return `
+        <table class="result-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>b</th>
+              <th>x0</th>
+              <th>R²</th>
+              <th>SSE</th>
+              <th>n</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      `;
+    }
+
+    function runFit() {
+      const message = document.getElementById('message');
+      const resultsDiv = document.getElementById('results');
+      message.textContent = '';
+
+      try {
+        const { headers, xValues, series } = collectDataFromGrid();
+        const mode = document.getElementById('mode').value;
+
+        const results = [];
+        for (let i = 0; i < series.length; i += 1) {
+          const points = [];
+          for (let r = 0; r < xValues.length; r += 1) {
+            const y = series[i][r];
+            if (y !== null) points.push([xValues[r], y]);
+          }
+
+          if (points.length < 3) {
+            results.push({ name: headers[i + 1], b: NaN, x0: NaN, r2: NaN, sse: NaN, n: points.length });
+          } else {
+            results.push({ name: headers[i + 1], ...fitColumn(points, mode) });
+          }
+        }
+
+        resultsDiv.innerHTML = renderTable(results);
+      } catch (error) {
+        resultsDiv.textContent = 'No results yet.';
+        message.textContent = error.message;
+      }
+    }
+
+    addRows(DEFAULT_ROWS);
+    document.getElementById('gridBody').addEventListener('paste', handleGridPaste);
+    document.getElementById('addRows').addEventListener('click', () => addRows(10));
+    document.getElementById('clearGrid').addEventListener('click', clearGrid);
+    document.getElementById('runFit').addEventListener('click', runFit);
+  </script>
+</body>
+</html>
