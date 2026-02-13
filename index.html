@@ -31,6 +31,10 @@
 
     .result-table th, .result-table td { padding: 8px; text-align: right; }
     .result-table th:first-child, .result-table td:first-child { text-align: left; }
+    .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
+    .result-block { border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
+    .result-block h4 { margin: 0; padding: 8px 10px; background: #f3f4f6; }
+    .copy-area { width: 100%; min-height: 90px; box-sizing: border-box; border: none; border-top: 1px solid #d1d5db; padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -74,7 +78,7 @@
   </div>
 
   <div class="card">
-    <h3>Results (p-d, d-p, and PU)</h3>
+    <h3>Results (copy-friendly format)</h3>
     <div id="results">No results yet.</div>
     <p class="small">PU formulas used: <strong>b(PU) = (|b(p-d)| + |b(d-p)|)/2</strong>, <strong>x0(PU) = ((x0(p-d) + x0(d-p))/2) - 180</strong>.</p>
   </div>
@@ -268,29 +272,58 @@
       return { b: bestB, x0: bestX0, r2: rSquared(data, bestB, bestX0), sse: bestErr, n: data.length };
     }
 
-    function renderResults(rows) {
-      const htmlRows = rows.map((row) => `
-        <tr>
-          <td>${row.name}</td>
-          <td>${row.pdB}</td><td>${row.pdX0}</td><td>${row.pdR2}</td>
-          <td>${row.dpB}</td><td>${row.dpX0}</td><td>${row.dpR2}</td>
-          <td>${row.puB}</td><td>${row.puX0}</td>
-        </tr>
-      `).join('');
+    function buildCopyTable(title, labels, rowsByMetric) {
+      const header = [''].concat(labels).join('	');
+      const lines = [title, header];
+      rowsByMetric.forEach((metricRow) => {
+        lines.push([metricRow.label].concat(metricRow.values).join('	'));
+      });
+      return lines.join('
+');
+    }
+
+    function renderBlock(title, labels, rowsByMetric) {
+      const thead = `<tr><th></th>${labels.map((l) => `<th>${l}</th>`).join('')}</tr>`;
+      const tbody = rowsByMetric.map((metricRow) => `
+<tr><td>${metricRow.label}</td>${metricRow.values.map((v) => `<td>${v}</td>`).join('')}</tr>`).join('');
+      const copyText = buildCopyTable(title, labels, rowsByMetric)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 
       return `
-        <table class="result-table">
-          <thead>
-            <tr>
-              <th>Column</th>
-              <th>p-d b</th><th>p-d x0</th><th>p-d R²</th>
-              <th>d-p b</th><th>d-p x0</th><th>d-p R²</th>
-              <th>PU b</th><th>PU x0</th>
-            </tr>
-          </thead>
-          <tbody>${htmlRows}</tbody>
-        </table>
+        <div class="result-block">
+          <h4>${title}</h4>
+          <table class="result-table">
+            <thead>${thead}</thead>
+            <tbody>${tbody}</tbody>
+          </table>
+          <textarea class="copy-area" readonly>${copyText}</textarea>
+        </div>
       `;
+    }
+
+    function renderResults(rows) {
+      const labels = rows.map((row) => row.name);
+
+      const pdBlock = renderBlock('Pre-VR Upright p-d', labels, [
+        { label: 'b(preVR)', values: rows.map((row) => row.pdB) },
+        { label: 'x0(preVR)', values: rows.map((row) => row.pdX0) },
+        { label: 'Rsq', values: rows.map((row) => row.pdR2) },
+      ]);
+
+      const dpBlock = renderBlock('Pre-VR Upright d-p', labels, [
+        { label: 'b(preVR)', values: rows.map((row) => row.dpB) },
+        { label: 'x0(preVR)', values: rows.map((row) => row.dpX0) },
+        { label: 'Rsq', values: rows.map((row) => row.dpR2) },
+      ]);
+
+      const puBlock = renderBlock('Pre-VR Upright PU', labels, [
+        { label: 'b(preVR)', values: rows.map((row) => row.puB) },
+        { label: 'x0(preVR)', values: rows.map((row) => row.puX0) },
+      ]);
+
+      return `<div class="result-grid">${pdBlock}${dpBlock}${puBlock}</div>`;
     }
 
     function toFmt(v) {

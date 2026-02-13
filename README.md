@@ -38,6 +38,15 @@ For each of the 7 channels, the app reports:
 - d-p: `b`, `x0`, `R²`
 - PU: `b`, `x0`
 
+## Copy-friendly output layout
+
+Results are shown in three spreadsheet-style blocks for easy copy/paste:
+- **Pre-VR Upright p-d**: rows `b(preVR)`, `x0(preVR)`, `Rsq`
+- **Pre-VR Upright d-p**: rows `b(preVR)`, `x0(preVR)`, `Rsq`
+- **Pre-VR Upright PU**: rows `b(preVR)`, `x0(preVR)`
+
+Each block also includes a read-only text area with tab-separated values for one-click copy into Excel/Sheets.
+
 ## Run locally
 
 ```bash
