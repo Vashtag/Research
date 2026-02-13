@@ -28,6 +28,7 @@
     .input-grid input:focus { outline: 2px solid #93c5fd; outline-offset: -2px; }
     .group-pd { background: #e0f2fe !important; }
     .group-dp { background: #dcfce7 !important; }
+    .group-gauss { background: #fef3c7 !important; }
 
     .result-table th, .result-table td { padding: 8px; text-align: right; }
     .result-table th:first-child, .result-table td:first-child { text-align: left; }
@@ -35,10 +36,32 @@
     .result-block { border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
     .result-block h4 { margin: 0; padding: 8px 10px; background: #f3f4f6; }
     .copy-area { width: 100%; min-height: 90px; box-sizing: border-box; border: none; border-top: 1px solid #d1d5db; padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+    /* Tab navigation */
+    .tab-bar { display: flex; gap: 0; margin-bottom: 16px; }
+    .tab-btn { padding: 10px 20px; border: 1px solid #d1d5db; border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; background: #e5e7eb; color: #374151; font-weight: 600; font-size: 14px; }
+    .tab-btn.active { background: #fff; color: #2563eb; border-bottom: 2px solid #fff; margin-bottom: -1px; z-index: 1; }
+    .tab-btn:hover:not(.active) { background: #f3f4f6; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Chart grid */
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 16px; }
+    .chart-card { border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; background: #fff; }
+    .chart-card h4 { margin: 0; padding: 8px 12px; background: #f3f4f6; font-size: 14px; }
+    .chart-card canvas { display: block; width: 100%; }
   </style>
 </head>
 <body>
   <h1>Pre-VR Upright PU Calculator</h1>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="pu">PU Calculator</button>
+    <button class="tab-btn" data-tab="gauss">Gaussian FMS Analysis</button>
+  </div>
+
+  <!-- ===== PU Calculator Tab ===== -->
+  <div id="tab-pu" class="tab-panel active">
   <p class="small">Paste all 16 columns directly from Excel. Left block is p-d (x + 7 columns), right block is d-p (x + 7 columns).</p>
 
   <div class="card">
@@ -82,6 +105,50 @@
     <div id="results">No results yet.</div>
     <p class="small">PU formulas used: <strong>b(PU) = (|b(p-d)| + |b(d-p)|)/2</strong>, <strong>x0(PU) = ((x0(p-d) + x0(d-p))/2) - 180</strong>.</p>
   </div>
+  </div><!-- end tab-pu -->
+
+  <!-- ===== Gaussian FMS Analysis Tab ===== -->
+  <div id="tab-gauss" class="tab-panel">
+    <p class="small">Enter each participant's x0 value (per background) and FMS score. One row per participant. The app will fit a 3-parameter Gaussian for each background.</p>
+
+    <div class="card">
+      <div class="controls">
+        <button id="gaussAddRows" class="btn-secondary" type="button">Add 10 Rows</button>
+        <button id="gaussClearGrid" class="btn-secondary" type="button">Clear Grid</button>
+        <button id="gaussRun" type="button">Run Gaussian Fit</button>
+      </div>
+
+      <div class="grid-wrap">
+        <table class="input-grid">
+          <thead>
+            <tr>
+              <th class="group-gauss">FMS</th>
+              <th class="group-gauss">x0 grey</th>
+              <th class="group-gauss">x0 room_0</th>
+              <th class="group-gauss">x0 room_60</th>
+              <th class="group-gauss">x0 room_120</th>
+              <th class="group-gauss">x0 room_180</th>
+              <th class="group-gauss">x0 room_240</th>
+              <th class="group-gauss">x0 room_300</th>
+            </tr>
+          </thead>
+          <tbody id="gaussGridBody"></tbody>
+        </table>
+      </div>
+
+      <p id="gaussMessage" class="error"></p>
+    </div>
+
+    <div class="card">
+      <h3>Gaussian Fit Results</h3>
+      <div id="gaussResults">No results yet.</div>
+    </div>
+
+    <div class="card">
+      <h3>Figures</h3>
+      <div id="gaussCharts" class="chart-grid">No figures yet.</div>
+    </div>
+  </div><!-- end tab-gauss -->
 
   <script>
     const TOTAL_COLUMNS = 16;
@@ -383,6 +450,371 @@
     document.getElementById('addRows').addEventListener('click', () => addRows(10));
     document.getElementById('clearGrid').addEventListener('click', clearGrid);
     document.getElementById('runCalc').addEventListener('click', runCalculation);
+
+    /* ========== Tab switching ========== */
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    /* ========== Gaussian FMS Analysis ========== */
+    const GAUSS_COLS = 8; // FMS + 7 backgrounds
+    const GAUSS_DEFAULT_ROWS = 30;
+    const GAUSS_BG_NAMES = ['grey', 'room_0', 'room_60', 'room_120', 'room_180', 'room_240', 'room_300'];
+
+    function gaussCreateRow(rowIndex) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < GAUSS_COLS; c++) {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.row = String(rowIndex);
+        input.dataset.col = String(c);
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+      return tr;
+    }
+
+    function gaussAddRows(count) {
+      const body = document.getElementById('gaussGridBody');
+      const start = body.children.length;
+      for (let i = 0; i < count; i++) body.appendChild(gaussCreateRow(start + i));
+    }
+
+    function gaussClearGrid() {
+      document.querySelectorAll('#gaussGridBody input').forEach((input) => { input.value = ''; });
+    }
+
+    function gaussHandlePaste(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.closest('#gaussGridBody')) return;
+      const pasted = event.clipboardData?.getData('text');
+      if (!pasted) return;
+      event.preventDefault();
+
+      const rowStart = Number(target.dataset.row);
+      const colStart = Number(target.dataset.col);
+      const lines = pasted.replace(/\r/g, '').split('\n').filter((l) => l.length > 0);
+      const matrix = lines.map((l) => l.split('\t'));
+
+      const neededRows = rowStart + matrix.length;
+      const currentRows = document.querySelectorAll('#gaussGridBody tr').length;
+      if (neededRows > currentRows) gaussAddRows(neededRows - currentRows + 5);
+
+      matrix.forEach((cells, rOff) => {
+        cells.forEach((val, cOff) => {
+          const c = colStart + cOff;
+          if (c >= GAUSS_COLS) return;
+          const cell = document.querySelector(`#gaussGridBody input[data-row="${rowStart + rOff}"][data-col="${c}"]`);
+          if (cell) cell.value = val.trim();
+        });
+      });
+    }
+
+    /* Collect Gaussian data: returns { fms: number[], x0PerBg: number[][] } */
+    function gaussCollectData() {
+      const rows = [...document.querySelectorAll('#gaussGridBody tr')];
+      const fms = [];
+      const x0PerBg = Array.from({ length: 7 }, () => []);
+
+      rows.forEach((row) => {
+        const cells = [...row.querySelectorAll('input')];
+        if (cells.length < GAUSS_COLS) return;
+        const fmsVal = parseNumber(cells[0].value);
+        if (fmsVal === null) return;
+
+        // Need at least one x0 in the row
+        let hasX0 = false;
+        const x0Vals = [];
+        for (let i = 0; i < 7; i++) {
+          const v = parseNumber(cells[i + 1].value);
+          x0Vals.push(v);
+          if (v !== null) hasX0 = true;
+        }
+        if (!hasX0) return;
+
+        fms.push(fmsVal);
+        for (let i = 0; i < 7; i++) x0PerBg[i].push(x0Vals[i]);
+      });
+
+      if (fms.length < 3) throw new Error('Need at least 3 participants with valid FMS and x0 data.');
+      return { fms, x0PerBg };
+    }
+
+    /* 3-parameter Gaussian: y = a * exp(-((x - mu)^2) / (2 * sigma^2)) */
+    function gaussian(x, a, mu, sigma) {
+      return a * Math.exp(-((x - mu) ** 2) / (2 * sigma * sigma));
+    }
+
+    function gaussSSE(pairs, a, mu, sigma) {
+      let err = 0;
+      for (const [x, y] of pairs) {
+        const d = gaussian(x, a, mu, sigma) - y;
+        err += d * d;
+      }
+      return err;
+    }
+
+    function gaussRSquared(pairs, a, mu, sigma) {
+      const meanY = pairs.reduce((s, [, y]) => s + y, 0) / pairs.length;
+      let ssRes = 0, ssTot = 0;
+      for (const [x, y] of pairs) {
+        ssRes += (y - gaussian(x, a, mu, sigma)) ** 2;
+        ssTot += (y - meanY) ** 2;
+      }
+      return ssTot === 0 ? NaN : 1 - ssRes / ssTot;
+    }
+
+    function fitGaussian(pairs) {
+      // pairs: [[x0, fms], ...]
+      const xs = pairs.map(([x]) => x);
+      const ys = pairs.map(([, y]) => y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const maxY = Math.max(...ys);
+      const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+
+      let bestErr = Infinity;
+      let bestA = maxY, bestMu = meanX, bestSig = (maxX - minX) / 4;
+
+      // Coarse grid search
+      for (let a = maxY * 0.2; a <= maxY * 1.5; a += maxY * 0.1 || 0.5) {
+        for (let mu = minX; mu <= maxX; mu += (maxX - minX) / 20 || 1) {
+          for (let sig = (maxX - minX) * 0.05; sig <= (maxX - minX) * 1.5; sig += (maxX - minX) * 0.1 || 1) {
+            if (sig < 0.01) continue;
+            const err = gaussSSE(pairs, a, mu, sig);
+            if (err < bestErr) {
+              bestErr = err;
+              bestA = a;
+              bestMu = mu;
+              bestSig = sig;
+            }
+          }
+        }
+      }
+
+      // Refinement via hill-climbing
+      let stepA = maxY * 0.1 || 1;
+      let stepMu = (maxX - minX) * 0.1 || 1;
+      let stepSig = (maxX - minX) * 0.1 || 1;
+
+      while (stepA > 1e-4 && stepMu > 1e-4 && stepSig > 1e-4) {
+        let improved = false;
+        for (const da of [0, -stepA, stepA]) {
+          for (const dm of [0, -stepMu, stepMu]) {
+            for (const ds of [0, -stepSig, stepSig]) {
+              const cA = bestA + da;
+              const cMu = bestMu + dm;
+              const cSig = bestSig + ds;
+              if (cA < 0 || cSig < 0.01) continue;
+              const err = gaussSSE(pairs, cA, cMu, cSig);
+              if (err < bestErr) {
+                bestErr = err;
+                bestA = cA;
+                bestMu = cMu;
+                bestSig = cSig;
+                improved = true;
+              }
+            }
+          }
+        }
+        if (!improved) {
+          stepA /= 2;
+          stepMu /= 2;
+          stepSig /= 2;
+        }
+      }
+
+      return { a: bestA, mu: bestMu, sigma: bestSig, r2: gaussRSquared(pairs, bestA, bestMu, bestSig), sse: bestErr, n: pairs.length };
+    }
+
+    /* Draw a chart on a canvas element */
+    function drawGaussChart(canvas, pairs, fit, title) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width;
+      const H = canvas.height;
+      const pad = { top: 30, right: 20, bottom: 50, left: 60 };
+      const plotW = W - pad.left - pad.right;
+      const plotH = H - pad.top - pad.bottom;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Data ranges
+      const xs = pairs.map(([x]) => x);
+      const ys = pairs.map(([, y]) => y);
+      const xMin = Math.min(...xs) - Math.abs(Math.min(...xs)) * 0.1 - 5;
+      const xMax = Math.max(...xs) + Math.abs(Math.max(...xs)) * 0.1 + 5;
+
+      // Compute Gaussian curve to find actual y-range
+      const curvePts = [];
+      for (let i = 0; i <= 200; i++) {
+        const x = xMin + (xMax - xMin) * (i / 200);
+        curvePts.push([x, gaussian(x, fit.a, fit.mu, fit.sigma)]);
+      }
+      const allY = ys.concat(curvePts.map(([, y]) => y));
+      const yMin = Math.min(0, Math.min(...allY) - 1);
+      const yMax = Math.max(...allY) * 1.15;
+
+      function toCanvasX(x) { return pad.left + ((x - xMin) / (xMax - xMin)) * plotW; }
+      function toCanvasY(y) { return pad.top + plotH - ((y - yMin) / (yMax - yMin)) * plotH; }
+
+      // Background
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+
+      // Grid lines
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 1;
+      const yTicks = 6;
+      for (let i = 0; i <= yTicks; i++) {
+        const y = yMin + (yMax - yMin) * (i / yTicks);
+        const cy = toCanvasY(y);
+        ctx.beginPath(); ctx.moveTo(pad.left, cy); ctx.lineTo(W - pad.right, cy); ctx.stroke();
+      }
+
+      // Axes
+      ctx.strokeStyle = '#374151';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, pad.top + plotH);
+      ctx.lineTo(W - pad.right, pad.top + plotH);
+      ctx.stroke();
+
+      // Axis labels
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+
+      // X-axis ticks
+      const xTicks = 6;
+      for (let i = 0; i <= xTicks; i++) {
+        const x = xMin + (xMax - xMin) * (i / xTicks);
+        const cx = toCanvasX(x);
+        ctx.beginPath(); ctx.moveTo(cx, pad.top + plotH); ctx.lineTo(cx, pad.top + plotH + 5); ctx.stroke();
+        ctx.fillText(x.toFixed(1), cx, pad.top + plotH + 18);
+      }
+
+      // Y-axis ticks
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= yTicks; i++) {
+        const y = yMin + (yMax - yMin) * (i / yTicks);
+        const cy = toCanvasY(y);
+        ctx.fillText(y.toFixed(1), pad.left - 8, cy + 4);
+      }
+
+      // Axis titles
+      ctx.save();
+      ctx.font = '13px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('x0', pad.left + plotW / 2, H - 5);
+      ctx.save();
+      ctx.translate(15, pad.top + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('FMS', 0, 0);
+      ctx.restore();
+      ctx.restore();
+
+      // Gaussian curve
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      curvePts.forEach(([x, y], i) => {
+        const cx = toCanvasX(x);
+        const cy = toCanvasY(y);
+        if (i === 0) ctx.moveTo(cx, cy);
+        else ctx.lineTo(cx, cy);
+      });
+      ctx.stroke();
+
+      // Data points
+      ctx.fillStyle = '#2563eb';
+      pairs.forEach(([x, y]) => {
+        const cx = toCanvasX(x);
+        const cy = toCanvasY(y);
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Title
+      ctx.fillStyle = '#111827';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(title, W / 2, 18);
+
+      // Fit info
+      ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillStyle = '#6b7280';
+      ctx.textAlign = 'left';
+      ctx.fillText(`a=${fit.a.toFixed(2)}  mu=${fit.mu.toFixed(2)}  sigma=${fit.sigma.toFixed(2)}  R²=${fit.r2.toFixed(4)}`, pad.left + 5, pad.top + 15);
+    }
+
+    function runGaussianAnalysis() {
+      const msg = document.getElementById('gaussMessage');
+      const resultsDiv = document.getElementById('gaussResults');
+      const chartsDiv = document.getElementById('gaussCharts');
+      msg.textContent = '';
+
+      try {
+        const { fms, x0PerBg } = gaussCollectData();
+        const fits = [];
+        let resultsHTML = '';
+        let chartsHTML = '';
+
+        for (let i = 0; i < 7; i++) {
+          const pairs = [];
+          for (let j = 0; j < fms.length; j++) {
+            if (x0PerBg[i][j] !== null) pairs.push([x0PerBg[i][j], fms[j]]);
+          }
+
+          if (pairs.length < 3) {
+            fits.push(null);
+            continue;
+          }
+
+          const fit = fitGaussian(pairs);
+          fits.push({ ...fit, pairs });
+          chartsHTML += `<div class="chart-card"><h4>${GAUSS_BG_NAMES[i]}</h4><canvas id="gaussCanvas_${i}" width="520" height="380"></canvas></div>`;
+        }
+
+        // Results table
+        const labels = GAUSS_BG_NAMES.filter((_, i) => fits[i] !== null);
+        const validFits = fits.filter((f) => f !== null);
+        resultsHTML = renderBlock('Gaussian Fit Parameters', labels, [
+          { label: 'a', values: validFits.map((f) => f.a.toFixed(4)) },
+          { label: 'mu', values: validFits.map((f) => f.mu.toFixed(4)) },
+          { label: 'sigma', values: validFits.map((f) => f.sigma.toFixed(4)) },
+          { label: 'R²', values: validFits.map((f) => f.r2.toFixed(4)) },
+          { label: 'n', values: validFits.map((f) => String(f.n)) },
+        ]);
+
+        resultsDiv.innerHTML = resultsHTML;
+        chartsDiv.innerHTML = chartsHTML || 'No backgrounds with enough data.';
+
+        // Draw charts after DOM update
+        for (let i = 0; i < 7; i++) {
+          if (!fits[i]) continue;
+          const canvas = document.getElementById(`gaussCanvas_${i}`);
+          if (canvas) drawGaussChart(canvas, fits[i].pairs, fits[i], GAUSS_BG_NAMES[i]);
+        }
+      } catch (error) {
+        resultsDiv.textContent = 'No results yet.';
+        chartsDiv.textContent = 'No figures yet.';
+        msg.textContent = error.message;
+      }
+    }
+
+    gaussAddRows(GAUSS_DEFAULT_ROWS);
+    document.getElementById('gaussGridBody').addEventListener('paste', gaussHandlePaste);
+    document.getElementById('gaussAddRows').addEventListener('click', () => gaussAddRows(10));
+    document.getElementById('gaussClearGrid').addEventListener('click', gaussClearGrid);
+    document.getElementById('gaussRun').addEventListener('click', runGaussianAnalysis);
   </script>
 </body>
 </html>
