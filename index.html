@@ -273,19 +273,19 @@
     }
 
     function buildCopyTable(title, labels, rowsByMetric) {
-      const header = [''].concat(labels).join('	');
+      const header = [''].concat(labels).join('\t');
       const lines = [title, header];
       rowsByMetric.forEach((metricRow) => {
-        lines.push([metricRow.label].concat(metricRow.values).join('	'));
+        lines.push([metricRow.label].concat(metricRow.values).join('\t'));
       });
-      return lines.join('
-');
+      return lines.join('\n');
     }
 
     function renderBlock(title, labels, rowsByMetric) {
       const thead = `<tr><th></th>${labels.map((l) => `<th>${l}</th>`).join('')}</tr>`;
-      const tbody = rowsByMetric.map((metricRow) => `
-<tr><td>${metricRow.label}</td>${metricRow.values.map((v) => `<td>${v}</td>`).join('')}</tr>`).join('');
+      const tbody = rowsByMetric
+        .map((metricRow) => `<tr><td>${metricRow.label}</td>${metricRow.values.map((v) => `<td>${v}</td>`).join('')}</tr>`)
+        .join('');
       const copyText = buildCopyTable(title, labels, rowsByMetric)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
