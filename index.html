@@ -1,1 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sigmoid Batch Fitter</title>
+  <style>
+    :root { font-family: Arial, sans-serif; }
+    body { margin: 24px; color: #1f2937; background: #f8fafc; }
+    h1 { margin-bottom: 8px; }
+    .card { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 16px; }
+    textarea { width: 100%; min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    label { font-weight: 600; margin-right: 8px; }
+    select, button { padding: 8px 10px; margin-right: 10px; }
+    button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .error { color: #b91c1c; font-weight: 600; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #d1d5db; padding: 8px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    .small { font-size: 12px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>3-Parameter Sigmoid Batch Fitter</h1>
+  <p class="small">Paste an 8-column table (tab-separated): first column is x, next columns are series to fit. Missing cells can be blank.</p>
 
+  <div class="card">
+    <textarea id="dataInput" placeholder="Paste your table here..."></textarea>
+    <div style="margin-top: 10px;">
+      <label for="mode">Direction:</label>
+      <select id="mode">
+        <option value="p-d">p-d (constraint: b &lt; 1)</option>
+        <option value="d-p">d-p (constraint: b &gt; 0)</option>
+      </select>
+      <button id="runFit">Run Fit</button>
+    </div>
+    <p id="message" class="error"></p>
+  </div>
+
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet.</div>
+  </div>
+
+  <script>
+    function parseNumber(value) {
+      const cleaned = value.trim();
+      if (!cleaned) return null;
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function parseData(raw) {
+      const lines = raw.replace(/\r/g, '').split('\n').filter((line) => line.trim().length > 0);
+      if (lines.length < 2) throw new Error('Need a header row and at least one data row.');
+
+      const delimiter = lines[0].includes('\t') ? '\t' : ',';
+      const rows = lines.map((line) => line.split(delimiter));
+      const headers = rows[0].slice(0, 8).map((h, i) => (h.trim() || `col_${i + 1}`));
+
+      if (headers.length < 8) throw new Error('Expected 8 columns (x + 7 data columns).');
+
+      const xValues = [];
+      const series = headers.slice(1).map(() => []);
+
+      for (let r = 1; r < rows.length; r += 1) {
+        const cols = rows[r];
+        const x = parseNumber(cols[0] || '');
+        if (x === null) continue;
+        xValues.push(x);
+        for (let c = 1; c < 8; c += 1) {
+          const y = parseNumber(cols[c] || '');
+          series[c - 1].push(y);
+        }
+      }
+
+      if (xValues.length === 0) throw new Error('No valid x values found in first column.');
+
+      return { headers, xValues, series };
+    }
+
+    function sigmoid(x, b, x0) {
+      const z = -(x - x0) / b;
+      if (z > 60) return 0;
+      if (z < -60) return 1;
+      return 1 / (1 + Math.exp(z));
+    }
+
+    function sse(data, b, x0) {
+      let err = 0;
+      for (const [x, y] of data) {
+        const d = sigmoid(x, b, x0) - y;
+        err += d * d;
+      }
+      return err;
+    }
+
+    function rSquared(data, b, x0) {
+      const meanY = data.reduce((s, [, y]) => s + y, 0) / data.length;
+      let ssRes = 0;
+      let ssTot = 0;
+      for (const [x, y] of data) {
+        const pred = sigmoid(x, b, x0);
+        ssRes += (y - pred) ** 2;
+        ssTot += (y - meanY) ** 2;
+      }
+      if (ssTot === 0) return NaN;
+      return 1 - (ssRes / ssTot);
+    }
+
+    function fitColumn(data, mode) {
+      const xs = data.map(([x]) => x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+
+      let bestErr = Infinity;
+      let bestB = mode === 'd-p' ? 1 : -1;
+      let bestX0 = 0;
+
+      const bMin = mode === 'd-p' ? 0.05 : -200;
+      const bMax = mode === 'd-p' ? 200 : 0.95;
+      const x0Min = Math.floor(minX - 100);
+      const x0Max = Math.ceil(maxX + 100);
+
+      for (let b = bMin; b <= bMax; b += 0.5) {
+        if (Math.abs(b) < 1e-9) continue;
+        if (mode === 'p-d' && !(b < 1)) continue;
+        if (mode === 'd-p' && !(b > 0)) continue;
+
+        for (let x0 = x0Min; x0 <= x0Max; x0 += 1) {
+          const err = sse(data, b, x0);
+          if (err < bestErr) {
+            bestErr = err;
+            bestB = b;
+            bestX0 = x0;
+          }
+        }
+      }
+
+      let stepB = 5;
+      let stepX0 = 5;
+
+      while (stepB > 1e-4) {
+        let improved = false;
+        for (const db of [0, -stepB, stepB]) {
+          for (const dx of [0, -stepX0, stepX0]) {
+            const candidateB = bestB + db;
+            if (Math.abs(candidateB) < 1e-9) continue;
+            if (mode === 'p-d' && !(candidateB < 1)) continue;
+            if (mode === 'd-p' && !(candidateB > 0)) continue;
+
+            const candidateX0 = bestX0 + dx;
+            const err = sse(data, candidateB, candidateX0);
+            if (err < bestErr) {
+              bestErr = err;
+              bestB = candidateB;
+              bestX0 = candidateX0;
+              improved = true;
+            }
+          }
+        }
+
+        if (!improved) {
+          stepB /= 2;
+          stepX0 /= 2;
+        }
+      }
+
+      return { b: bestB, x0: bestX0, sse: bestErr, r2: rSquared(data, bestB, bestX0), n: data.length };
+    }
+
+    function renderTable(headers, rows) {
+      const tableRows = rows.map((row) => `
+        <tr>
+          <td>${row.name}</td>
+          <td>${row.b.toFixed(6)}</td>
+          <td>${row.x0.toFixed(6)}</td>
+          <td>${Number.isFinite(row.r2) ? row.r2.toFixed(6) : 'NaN'}</td>
+          <td>${row.sse.toFixed(6)}</td>
+          <td>${row.n}</td>
+        </tr>
+      `).join('');
+
+      return `
+        <table>
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>b</th>
+              <th>x0</th>
+              <th>R²</th>
+              <th>SSE</th>
+              <th>n</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      `;
+    }
+
+    document.getElementById('runFit').addEventListener('click', () => {
+      const message = document.getElementById('message');
+      const resultsDiv = document.getElementById('results');
+      message.textContent = '';
+
+      try {
+        const { headers, xValues, series } = parseData(document.getElementById('dataInput').value);
+        const mode = document.getElementById('mode').value;
+
+        const results = [];
+        for (let i = 0; i < series.length; i += 1) {
+          const points = [];
+          for (let r = 0; r < xValues.length; r += 1) {
+            const y = series[i][r];
+            if (y !== null) points.push([xValues[r], y]);
+          }
+
+          if (points.length < 3) {
+            results.push({ name: headers[i + 1], b: NaN, x0: NaN, r2: NaN, sse: NaN, n: points.length });
+          } else {
+            results.push({ name: headers[i + 1], ...fitColumn(points, mode) });
+          }
+        }
+
+        resultsDiv.innerHTML = renderTable(headers, results);
+      } catch (error) {
+        resultsDiv.textContent = 'No results yet.';
+        message.textContent = error.message;
+      }
+    });
+  </script>
+</body>
+</html>
