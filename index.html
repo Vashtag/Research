@@ -30,6 +30,10 @@
     .group-dp { background: #dcfce7 !important; }
     .group-gauss { background: #fef3c7 !important; }
     .group-vsm { background: #ede9fe !important; }
+    .vsm-ignored { background: #f3f4f6 !important; opacity: 0.5; }
+    .vsm-ignored input { color: #9ca3af; }
+    .vsm-label input { min-width: 160px; font-weight: 600; }
+    .vsm-tilt input { min-width: 55px; text-align: center; }
 
     .result-table th, .result-table td { padding: 8px; text-align: right; }
     .result-table th:first-child, .result-table td:first-child { text-align: left; }
@@ -154,27 +158,28 @@
 
   <!-- ===== Vector Sum Model Tab ===== -->
   <div id="tab-vsm" class="tab-panel">
-    <p class="small">Enter PU values (degrees) for each body tilt and visual background condition. Each row is one body tilt. The model fits vis1, vis2, vis3 (visual harmonic weights) and bod (body weight) with gravity fixed at 1.</p>
+    <p class="small">Paste x0 PU values from your PU Calculator output. Grey column is present for paste compatibility but ignored. Tilt is fixed per row. The model pairs each Upright (0&deg;) row with each RSD (&minus;90&deg;) row and fits vis1, vis2, vis3, bod (g&nbsp;=&nbsp;1 fixed).</p>
 
     <div class="card">
       <div class="controls">
-        <button id="vsmAddRows" class="btn-secondary" type="button">Add 10 Rows</button>
-        <button id="vsmClearGrid" class="btn-secondary" type="button">Clear Grid</button>
+        <button id="vsmAddRow" class="btn-secondary" type="button">Add Row</button>
+        <button id="vsmClearGrid" class="btn-secondary" type="button">Clear Values</button>
         <button id="vsmRun" type="button">Fit Vector Sum Model</button>
       </div>
 
       <div class="grid-wrap">
-        <table class="input-grid">
+        <table class="input-grid" id="vsmTable">
           <thead>
             <tr>
-              <th class="group-vsm">Tilt</th>
-              <th class="group-vsm">PU grey</th>
-              <th class="group-vsm">PU room_0</th>
-              <th class="group-vsm">PU room_60</th>
-              <th class="group-vsm">PU room_120</th>
-              <th class="group-vsm">PU room_180</th>
-              <th class="group-vsm">PU room_240</th>
-              <th class="group-vsm">PU room_300</th>
+              <th class="group-vsm vsm-label">Condition</th>
+              <th class="group-vsm vsm-tilt">Tilt&deg;</th>
+              <th class="vsm-ignored">grey</th>
+              <th class="group-vsm">room_0</th>
+              <th class="group-vsm">room_60</th>
+              <th class="group-vsm">room_120</th>
+              <th class="group-vsm">room_180</th>
+              <th class="group-vsm">room_240</th>
+              <th class="group-vsm">room_300</th>
             </tr>
           </thead>
           <tbody id="vsmGridBody"></tbody>
@@ -862,35 +867,57 @@
     document.getElementById('gaussRun').addEventListener('click', runGaussianAnalysis);
 
     /* ========== Vector Sum Model ========== */
-    const VSM_COLS = 8; // tilt + 7 backgrounds
-    const VSM_DEFAULT_ROWS = 20;
-    const VSM_VIS_ORIENTATIONS = [null, 0, 60, 120, 180, 240, 300]; // null = grey (no visual)
-    const VSM_BG_NAMES = ['grey', 'room_0', 'room_60', 'room_120', 'room_180', 'room_240', 'room_300'];
+    const VSM_COLS = 9; // label + tilt + grey(ignored) + 6 rooms
+    const VSM_VIS_ANGLES = [0, 60, 120, 180, 240, 300];
+    const VSM_ROOM_NAMES = ['room_0', 'room_60', 'room_120', 'room_180', 'room_240', 'room_300'];
     const DEG2RAD = Math.PI / 180;
     const RAD2DEG = 180 / Math.PI;
 
-    function vsmCreateRow(rowIndex) {
+    const VSM_DEFAULTS = [
+      { label: 'Pre-VR Upright PU', tilt: '0' },
+      { label: 'PreStim-VR RSD PU', tilt: '-90' },
+      { label: 'Post-STIM-VR RSD PU', tilt: '-90' },
+      { label: 'Pre-noSTIM-VR RSD PU', tilt: '-90' },
+      { label: 'Post-noSTIM-VR RSD PU', tilt: '-90' },
+    ];
+
+    function vsmCreateRow(rowIndex, defaults) {
       const tr = document.createElement('tr');
       for (let c = 0; c < VSM_COLS; c++) {
         const td = document.createElement('td');
+        if (c === 2) td.classList.add('vsm-ignored');
+        if (c === 0) td.classList.add('vsm-label');
+        if (c === 1) td.classList.add('vsm-tilt');
         const input = document.createElement('input');
         input.type = 'text';
         input.dataset.row = String(rowIndex);
         input.dataset.col = String(c);
+        if (defaults) {
+          if (c === 0) input.value = defaults.label || '';
+          if (c === 1) input.value = defaults.tilt || '';
+        }
         td.appendChild(input);
         tr.appendChild(td);
       }
       return tr;
     }
 
-    function vsmAddRows(count) {
+    function vsmInit() {
       const body = document.getElementById('vsmGridBody');
-      const start = body.children.length;
-      for (let i = 0; i < count; i++) body.appendChild(vsmCreateRow(start + i));
+      VSM_DEFAULTS.forEach((def, i) => body.appendChild(vsmCreateRow(i, def)));
+    }
+
+    function vsmAddRow() {
+      const body = document.getElementById('vsmGridBody');
+      body.appendChild(vsmCreateRow(body.children.length, null));
     }
 
     function vsmClearGrid() {
-      document.querySelectorAll('#vsmGridBody input').forEach((input) => { input.value = ''; });
+      // Clear only the data columns (grey + 6 rooms), keep labels and tilts
+      document.querySelectorAll('#vsmGridBody input').forEach((input) => {
+        const col = Number(input.dataset.col);
+        if (col >= 2) input.value = '';
+      });
     }
 
     function vsmHandlePaste(event) {
@@ -907,7 +934,9 @@
 
       const neededRows = rowStart + matrix.length;
       const currentRows = document.querySelectorAll('#vsmGridBody tr').length;
-      if (neededRows > currentRows) vsmAddRows(neededRows - currentRows + 5);
+      if (neededRows > currentRows) {
+        for (let i = currentRows; i < neededRows + 2; i++) vsmAddRow();
+      }
 
       matrix.forEach((cells, rOff) => {
         cells.forEach((val, cOff) => {
@@ -919,38 +948,41 @@
       });
     }
 
-    function vsmCollectData() {
+    /* Collect rows: {label, tilt, pu[6]} */
+    function vsmCollectRows() {
       const rows = [...document.querySelectorAll('#vsmGridBody tr')];
-      const dataPoints = []; // [{tilt, visOrientation (null for grey), actualPU}]
+      const result = [];
 
       rows.forEach((row) => {
         const cells = [...row.querySelectorAll('input')];
         if (cells.length < VSM_COLS) return;
-        const tilt = parseNumber(cells[0].value);
+        const label = cells[0].value.trim() || `Row ${result.length + 1}`;
+        const tilt = parseNumber(cells[1].value);
         if (tilt === null) return;
 
-        for (let i = 0; i < 7; i++) {
-          const pu = parseNumber(cells[i + 1].value);
-          if (pu === null) continue;
-          dataPoints.push({ tilt, visIdx: i, visOrientation: VSM_VIS_ORIENTATIONS[i], actualPU: pu });
+        // Cols 3-8 are room_0 through room_300 (skip col 2 = grey)
+        const pu = [];
+        let hasData = false;
+        for (let i = 0; i < 6; i++) {
+          const v = parseNumber(cells[i + 3].value);
+          pu.push(v);
+          if (v !== null) hasData = true;
         }
+        if (!hasData) return;
+        result.push({ label, tilt, pu });
       });
 
-      if (dataPoints.length < 4) throw new Error('Need at least 4 valid PU data points to fit 4 parameters.');
-      return dataPoints;
+      return result;
     }
 
-    /* Predict PU using vector sum model */
+    /* Predict PU using vector sum model (Dyde et al., 2006) */
     function vsmPredict(tiltDeg, visDeg, vis1, vis2, vis3, bod) {
       const g = 1;
       const tilt = tiltDeg * DEG2RAD;
-      let vx = 0, vy = 0;
+      const v = visDeg * DEG2RAD;
 
-      if (visDeg !== null) {
-        const v = visDeg * DEG2RAD;
-        vy = vis1 * Math.cos(v) + vis2 * Math.cos(2 * v) + vis3 * Math.cos(4 * v);
-        vx = vis1 * Math.sin(v) + vis2 * Math.sin(2 * v) + vis3 * Math.sin(4 * v);
-      }
+      const vy = vis1 * Math.cos(v) + vis2 * Math.cos(2 * v) + vis3 * Math.cos(4 * v);
+      const vx = vis1 * Math.sin(v) + vis2 * Math.sin(2 * v) + vis3 * Math.sin(4 * v);
 
       const y = bod + vy + g * Math.cos(tilt);
       const x = vx + g * Math.sin(tilt);
@@ -969,19 +1001,19 @@
     function vsmSSE(dataPoints, vis1, vis2, vis3, bod) {
       let err = 0;
       for (const dp of dataPoints) {
-        const pred = vsmPredict(dp.tilt, dp.visOrientation, vis1, vis2, vis3, bod);
+        const pred = vsmPredict(dp.tilt, dp.vis, vis1, vis2, vis3, bod);
         const d = angleDiff(pred, dp.actualPU);
         err += d * d;
       }
       return err;
     }
 
-    /* R² for vector sum model */
+    /* R-squared for vector sum model */
     function vsmRSquared(dataPoints, vis1, vis2, vis3, bod) {
       const meanPU = dataPoints.reduce((s, dp) => s + dp.actualPU, 0) / dataPoints.length;
       let ssRes = 0, ssTot = 0;
       for (const dp of dataPoints) {
-        const pred = vsmPredict(dp.tilt, dp.visOrientation, vis1, vis2, vis3, bod);
+        const pred = vsmPredict(dp.tilt, dp.vis, vis1, vis2, vis3, bod);
         ssRes += angleDiff(pred, dp.actualPU) ** 2;
         ssTot += angleDiff(dp.actualPU, meanPU) ** 2;
       }
@@ -1045,7 +1077,7 @@
     }
 
     /* Draw predicted vs actual scatter plot */
-    function drawVsmChart(canvas, dataPoints, fit) {
+    function drawVsmChart(canvas, dataPoints, fit, title) {
       const ctx = canvas.getContext('2d');
       const W = canvas.width;
       const H = canvas.height;
@@ -1058,7 +1090,7 @@
       ctx.fillRect(0, 0, W, H);
 
       const actuals = dataPoints.map((dp) => dp.actualPU);
-      const predicteds = dataPoints.map((dp) => vsmPredict(dp.tilt, dp.visOrientation, fit.vis1, fit.vis2, fit.vis3, fit.bod));
+      const predicteds = dataPoints.map((dp) => vsmPredict(dp.tilt, dp.vis, fit.vis1, fit.vis2, fit.vis3, fit.bod));
       const all = actuals.concat(predicteds);
       const dMin = Math.min(...all) - 5;
       const dMax = Math.max(...all) + 5;
@@ -1119,43 +1151,61 @@
       ctx.fillText('Predicted PU (°)', 0, 0);
       ctx.restore();
 
-      // Color per background
-      const bgColors = ['#6b7280', '#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777'];
+      // Color by vis orientation
+      const visColors = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777'];
 
-      // Data points
+      // Data points - circle for tilt=0, triangle for tilt=-90
       dataPoints.forEach((dp, i) => {
         const actual = dp.actualPU;
         const pred = predicteds[i];
-        ctx.fillStyle = bgColors[dp.visIdx];
-        ctx.beginPath();
-        ctx.arc(toX(actual), toY(pred), 5, 0, Math.PI * 2);
-        ctx.fill();
+        const cx = toX(actual);
+        const cy = toY(pred);
+        ctx.fillStyle = visColors[dp.visIdx];
+        if (dp.tilt === 0) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - 6);
+          ctx.lineTo(cx - 5, cy + 4);
+          ctx.lineTo(cx + 5, cy + 4);
+          ctx.closePath();
+          ctx.fill();
+        }
       });
 
       // Title
       ctx.fillStyle = '#111827';
-      ctx.font = 'bold 14px Arial';
+      ctx.font = 'bold 13px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText('Predicted vs Actual PU', W / 2, 18);
+      ctx.fillText(title, W / 2, 18);
 
       // Fit info
       ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
       ctx.fillStyle = '#6b7280';
       ctx.textAlign = 'left';
-      ctx.fillText(`R²=${fit.r2.toFixed(4)}  vis1=${fit.vis1.toFixed(4)}  vis2=${fit.vis2.toFixed(4)}  vis3=${fit.vis3.toFixed(4)}  bod=${fit.bod.toFixed(4)}`, pad.left + 5, pad.top + 15);
+      ctx.fillText(`vis1=${fit.vis1.toFixed(4)}  vis2=${fit.vis2.toFixed(4)}  vis3=${fit.vis3.toFixed(4)}  bod=${fit.bod.toFixed(4)}  R²=${fit.r2.toFixed(4)}`, pad.left + 5, pad.top + 15);
 
       // Legend
-      const legendY = pad.top + 30;
-      VSM_BG_NAMES.forEach((name, i) => {
-        ctx.fillStyle = bgColors[i];
+      const legendY = pad.top + 28;
+      VSM_ROOM_NAMES.forEach((name, i) => {
+        ctx.fillStyle = visColors[i];
         ctx.beginPath();
-        ctx.arc(pad.left + 12, legendY + i * 16, 4, 0, Math.PI * 2);
+        ctx.arc(pad.left + 12, legendY + i * 15, 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#374151';
-        ctx.font = '11px Arial';
+        ctx.font = '10px Arial';
         ctx.textAlign = 'left';
-        ctx.fillText(name, pad.left + 22, legendY + i * 16 + 4);
+        ctx.fillText(name, pad.left + 22, legendY + i * 15 + 3);
       });
+      // Shape legend
+      const shapeY = legendY + 6 * 15 + 5;
+      ctx.fillStyle = '#374151';
+      ctx.beginPath(); ctx.arc(pad.left + 12, shapeY, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '10px Arial'; ctx.fillText('= tilt 0°', pad.left + 22, shapeY + 3);
+      ctx.beginPath(); ctx.moveTo(pad.left + 12, shapeY + 15 - 5); ctx.lineTo(pad.left + 7, shapeY + 15 + 3); ctx.lineTo(pad.left + 17, shapeY + 15 + 3); ctx.closePath(); ctx.fill();
+      ctx.fillText('= tilt -90°', pad.left + 22, shapeY + 18);
     }
 
     function runVectorSumModel() {
@@ -1165,57 +1215,87 @@
       msg.textContent = '';
 
       try {
-        const dataPoints = vsmCollectData();
-        const fit = fitVectorSum(dataPoints);
+        const rows = vsmCollectRows();
+        if (rows.length === 0) throw new Error('No valid rows found. Enter tilt and at least one PU value per row.');
 
-        // Build results table: parameters
-        const paramsHTML = renderBlock('Fitted Parameters (g = 1.0 fixed)', ['Value'], [
-          { label: 'vis1 (1st harmonic)', values: [fit.vis1.toFixed(6)] },
-          { label: 'vis2 (2nd harmonic)', values: [fit.vis2.toFixed(6)] },
-          { label: 'vis3 (4th harmonic)', values: [fit.vis3.toFixed(6)] },
-          { label: 'bod (body weight)', values: [fit.bod.toFixed(6)] },
-          { label: 'R²', values: [fit.r2.toFixed(6)] },
-          { label: 'SSE', values: [fit.sse.toFixed(6)] },
-          { label: 'n', values: [String(fit.n)] },
+        // Separate upright (tilt=0) and RSD (tilt!=0) rows
+        const uprightRows = rows.filter((r) => r.tilt === 0);
+        const rsdRows = rows.filter((r) => r.tilt !== 0);
+
+        if (uprightRows.length === 0) throw new Error('No Upright (tilt = 0°) rows found.');
+        if (rsdRows.length === 0) throw new Error('No RSD (tilt ≠ 0°) rows found.');
+
+        // Build pairs: each upright × each RSD
+        const pairResults = [];
+
+        for (const uRow of uprightRows) {
+          for (const rRow of rsdRows) {
+            const dataPoints = [];
+
+            // 6 data points from upright row (tilt=0)
+            for (let i = 0; i < 6; i++) {
+              if (uRow.pu[i] !== null) {
+                dataPoints.push({ tilt: uRow.tilt, vis: VSM_VIS_ANGLES[i], visIdx: i, actualPU: uRow.pu[i] });
+              }
+            }
+            // 6 data points from RSD row
+            for (let i = 0; i < 6; i++) {
+              if (rRow.pu[i] !== null) {
+                dataPoints.push({ tilt: rRow.tilt, vis: VSM_VIS_ANGLES[i], visIdx: i, actualPU: rRow.pu[i] });
+              }
+            }
+
+            if (dataPoints.length < 4) continue;
+
+            const fit = fitVectorSum(dataPoints);
+            const pairLabel = `${uRow.label} × ${rRow.label}`;
+            pairResults.push({ pairLabel, fit, dataPoints, uLabel: uRow.label, rLabel: rRow.label });
+          }
+        }
+
+        if (pairResults.length === 0) throw new Error('No valid pairs could be formed. Each pair needs at least 4 data points.');
+
+        // === Summary table: all pairs side by side ===
+        const pairLabels = pairResults.map((p) => p.pairLabel);
+        const summaryHTML = renderBlock('Fitted Parameters (g = 1.0 fixed)', pairLabels, [
+          { label: 'vis1 (1st harmonic)', values: pairResults.map((p) => p.fit.vis1.toFixed(6)) },
+          { label: 'vis2 (2nd harmonic)', values: pairResults.map((p) => p.fit.vis2.toFixed(6)) },
+          { label: 'vis3 (4th harmonic)', values: pairResults.map((p) => p.fit.vis3.toFixed(6)) },
+          { label: 'bod (body weight)', values: pairResults.map((p) => p.fit.bod.toFixed(6)) },
+          { label: 'R²', values: pairResults.map((p) => p.fit.r2.toFixed(6)) },
+          { label: 'SSE', values: pairResults.map((p) => p.fit.sse.toFixed(6)) },
+          { label: 'n', values: pairResults.map((p) => String(p.fit.n)) },
         ]);
 
-        // Build predicted vs actual table grouped by tilt
-        const tilts = [...new Set(dataPoints.map((dp) => dp.tilt))].sort((a, b) => a - b);
-        const predRows = [];
-        for (const tilt of tilts) {
-          const tiltPts = dataPoints.filter((dp) => dp.tilt === tilt);
-          const actualVals = [];
-          const predVals = [];
-          const bgLabels = [];
-          for (const dp of tiltPts) {
-            const pred = vsmPredict(dp.tilt, dp.visOrientation, fit.vis1, fit.vis2, fit.vis3, fit.bod);
-            bgLabels.push(VSM_BG_NAMES[dp.visIdx]);
-            actualVals.push(dp.actualPU.toFixed(2));
-            predVals.push(pred.toFixed(2));
+        // === Per-pair predicted vs actual tables ===
+        let compHTML = '';
+        for (const pr of pairResults) {
+          let tbl = `<div class="result-block"><h4>${pr.pairLabel}</h4><table class="result-table"><thead><tr><th>Tilt</th><th>Vis</th><th>Actual</th><th>Predicted</th><th>Error</th></tr></thead><tbody>`;
+          const copyLines = [`${pr.pairLabel}`, 'Tilt\tVis\tActual\tPredicted\tError'];
+          for (const dp of pr.dataPoints) {
+            const pred = vsmPredict(dp.tilt, dp.vis, pr.fit.vis1, pr.fit.vis2, pr.fit.vis3, pr.fit.bod);
+            const err = angleDiff(pred, dp.actualPU);
+            tbl += `<tr><td>${dp.tilt}</td><td>${dp.vis}</td><td>${dp.actualPU.toFixed(2)}</td><td>${pred.toFixed(2)}</td><td>${err.toFixed(2)}</td></tr>`;
+            copyLines.push(`${dp.tilt}\t${dp.vis}\t${dp.actualPU.toFixed(2)}\t${pred.toFixed(2)}\t${err.toFixed(2)}`);
           }
-          predRows.push({ tilt, bgLabels, actualVals, predVals });
+          tbl += '</tbody></table>';
+          tbl += `<textarea class="copy-area" readonly>${copyLines.join('\n')}</textarea></div>`;
+          compHTML += tbl;
         }
 
-        // Render comparison table
-        let compHTML = '<div class="result-block"><h4>Predicted vs Actual PU (°)</h4><table class="result-table"><thead><tr><th>Tilt</th><th>Background</th><th>Actual</th><th>Predicted</th><th>Error</th></tr></thead><tbody>';
-        const copyLines = ['Tilt\tBackground\tActual\tPredicted\tError'];
-        for (const pr of predRows) {
-          for (let i = 0; i < pr.bgLabels.length; i++) {
-            const err = (parseFloat(pr.predVals[i]) - parseFloat(pr.actualVals[i])).toFixed(2);
-            compHTML += `<tr><td>${pr.tilt}</td><td>${pr.bgLabels[i]}</td><td>${pr.actualVals[i]}</td><td>${pr.predVals[i]}</td><td>${err}</td></tr>`;
-            copyLines.push(`${pr.tilt}\t${pr.bgLabels[i]}\t${pr.actualVals[i]}\t${pr.predVals[i]}\t${err}`);
-          }
-        }
-        compHTML += '</tbody></table>';
-        compHTML += `<textarea class="copy-area" readonly>${copyLines.join('\n')}</textarea>`;
-        compHTML += '</div>';
+        resultsDiv.innerHTML = `<div class="result-grid">${summaryHTML}${compHTML}</div>`;
 
-        resultsDiv.innerHTML = `<div class="result-grid">${paramsHTML}${compHTML}</div>`;
+        // === Charts ===
+        let chartsHTML = '';
+        pairResults.forEach((pr, idx) => {
+          chartsHTML += `<div class="chart-card"><h4>${pr.pairLabel}</h4><canvas id="vsmCanvas_${idx}" width="520" height="420"></canvas></div>`;
+        });
+        chartsDiv.innerHTML = chartsHTML || 'No charts.';
 
-        // Draw chart
-        chartsDiv.innerHTML = '<div class="chart-card"><h4>Predicted vs Actual PU</h4><canvas id="vsmCanvas" width="520" height="420"></canvas></div>';
-        const canvas = document.getElementById('vsmCanvas');
-        if (canvas) drawVsmChart(canvas, dataPoints, fit);
+        pairResults.forEach((pr, idx) => {
+          const canvas = document.getElementById(`vsmCanvas_${idx}`);
+          if (canvas) drawVsmChart(canvas, pr.dataPoints, pr.fit, pr.pairLabel);
+        });
 
       } catch (error) {
         resultsDiv.textContent = 'No results yet.';
@@ -1224,9 +1304,9 @@
       }
     }
 
-    vsmAddRows(VSM_DEFAULT_ROWS);
+    vsmInit();
     document.getElementById('vsmGridBody').addEventListener('paste', vsmHandlePaste);
-    document.getElementById('vsmAddRows').addEventListener('click', () => vsmAddRows(10));
+    document.getElementById('vsmAddRow').addEventListener('click', vsmAddRow);
     document.getElementById('vsmClearGrid').addEventListener('click', vsmClearGrid);
     document.getElementById('vsmRun').addEventListener('click', runVectorSumModel);
   </script>
