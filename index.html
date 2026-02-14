@@ -983,7 +983,7 @@
       return err;
     }
 
-    /* Fit v, b using coarse grid + gradient descent + hill climbing */
+    /* Fit v, b using coarse grid + hill climbing */
     function fitVSM(dataPoints) {
       let bestErr = Infinity, bestV = 0, bestB = 1;
 
@@ -995,24 +995,9 @@
         }
       }
 
-      // Gradient descent with adaptive step
-      let lr = 0.0001;
-      for (let iter = 0; iter < 50000; iter++) {
-        const h = 1e-7;
-        const f0 = vsmSSE(dataPoints, bestV, bestB);
-        const gv = (vsmSSE(dataPoints, bestV + h, bestB) - f0) / h;
-        const gb = (vsmSSE(dataPoints, bestV, bestB + h) - f0) / h;
-        const nV = bestV - lr * gv;
-        const nB = bestB - lr * gb;
-        const nErr = vsmSSE(dataPoints, nV, nB);
-        if (nErr < bestErr) { bestErr = nErr; bestV = nV; bestB = nB; lr *= 1.05; }
-        else { lr *= 0.5; }
-        if (lr < 1e-15) break;
-      }
-
-      // Final hill-climbing polish
-      let step = 0.001;
-      while (step > 1e-9) {
+      // Hill-climbing refinement
+      let step = 0.01;
+      while (step > 1e-6) {
         let improved = false;
         for (const dv of [0, -step, step]) {
           for (const db of [0, -step, step]) {
