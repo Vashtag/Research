@@ -30,10 +30,8 @@
     .group-dp { background: #dcfce7 !important; }
     .group-gauss { background: #fef3c7 !important; }
     .group-vsm { background: #ede9fe !important; }
-    .vsm-ignored { background: #f3f4f6 !important; opacity: 0.5; }
-    .vsm-ignored input { color: #9ca3af; }
-    .vsm-label input { min-width: 160px; font-weight: 600; }
-    .vsm-tilt input { min-width: 55px; text-align: center; }
+    .vsm-fixed { text-align: center; color: #6b7280; font-variant-numeric: tabular-nums; padding: 7px !important; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .vsm-col-header { border: none; background: transparent; font-weight: 600; text-align: center; width: 100%; min-width: 90px; padding: 7px; box-sizing: border-box; font-size: 13px; }
 
     .result-table th, .result-table td { padding: 8px; text-align: right; }
     .result-table th:first-child, .result-table td:first-child { text-align: left; }
@@ -158,30 +156,19 @@
 
   <!-- ===== Vector Sum Model Tab ===== -->
   <div id="tab-vsm" class="tab-panel">
-    <p class="small">Paste x0 PU values from your PU Calculator output. Grey column is present for paste compatibility but ignored. Tilt is fixed per row. The model pairs each Upright (0&deg;) row with each RSD (&minus;90&deg;) row and fits vis1, vis2, vis3, bod (g&nbsp;=&nbsp;1 fixed).</p>
+    <p class="small">Paste PU x0 values for each condition. Tilt and Vis are fixed (12 rows). Each condition column is fit independently: v (visual weight) and b (body weight) with g&nbsp;=&nbsp;1 fixed. Paste only the PU columns (not Tilt/Vis).</p>
 
     <div class="card">
       <div class="controls">
-        <button id="vsmAddRow" class="btn-secondary" type="button">Add Row</button>
+        <button id="vsmAddCol" class="btn-secondary" type="button">Add Column</button>
+        <button id="vsmRemoveCol" class="btn-secondary" type="button">Remove Column</button>
         <button id="vsmClearGrid" class="btn-secondary" type="button">Clear Values</button>
         <button id="vsmRun" type="button">Fit Vector Sum Model</button>
       </div>
 
       <div class="grid-wrap">
         <table class="input-grid" id="vsmTable">
-          <thead>
-            <tr>
-              <th class="group-vsm vsm-label">Condition</th>
-              <th class="group-vsm vsm-tilt">Tilt&deg;</th>
-              <th class="vsm-ignored">grey</th>
-              <th class="group-vsm">room_0</th>
-              <th class="group-vsm">room_60</th>
-              <th class="group-vsm">room_120</th>
-              <th class="group-vsm">room_180</th>
-              <th class="group-vsm">room_240</th>
-              <th class="group-vsm">room_300</th>
-            </tr>
-          </thead>
+          <thead><tr id="vsmHead"></tr></thead>
           <tbody id="vsmGridBody"></tbody>
         </table>
       </div>
@@ -867,57 +854,83 @@
     document.getElementById('gaussRun').addEventListener('click', runGaussianAnalysis);
 
     /* ========== Vector Sum Model ========== */
-    const VSM_COLS = 9; // label + tilt + grey(ignored) + 6 rooms
+    const VSM_FIXED_ROWS = [
+      { tilt: 0, vis: 0 }, { tilt: 0, vis: 60 }, { tilt: 0, vis: 120 },
+      { tilt: 0, vis: 180 }, { tilt: 0, vis: 240 }, { tilt: 0, vis: 300 },
+      { tilt: -90, vis: 0 }, { tilt: -90, vis: 60 }, { tilt: -90, vis: 120 },
+      { tilt: -90, vis: 180 }, { tilt: -90, vis: 240 }, { tilt: -90, vis: 300 },
+    ];
     const VSM_VIS_ANGLES = [0, 60, 120, 180, 240, 300];
-    const VSM_ROOM_NAMES = ['room_0', 'room_60', 'room_120', 'room_180', 'room_240', 'room_300'];
     const DEG2RAD = Math.PI / 180;
     const RAD2DEG = 180 / Math.PI;
 
-    const VSM_DEFAULTS = [
-      { label: 'Pre-VR Upright PU', tilt: '0' },
-      { label: 'PreStim-VR RSD PU', tilt: '-90' },
-      { label: 'Post-STIM-VR RSD PU', tilt: '-90' },
-      { label: 'Pre-noSTIM-VR RSD PU', tilt: '-90' },
-      { label: 'Post-noSTIM-VR RSD PU', tilt: '-90' },
-    ];
+    let vsmConditions = ['Pre VR RSD', 'noSTIM', 'STIM'];
 
-    function vsmCreateRow(rowIndex, defaults) {
-      const tr = document.createElement('tr');
-      for (let c = 0; c < VSM_COLS; c++) {
-        const td = document.createElement('td');
-        if (c === 2) td.classList.add('vsm-ignored');
-        if (c === 0) td.classList.add('vsm-label');
-        if (c === 1) td.classList.add('vsm-tilt');
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.dataset.row = String(rowIndex);
-        input.dataset.col = String(c);
-        if (defaults) {
-          if (c === 0) input.value = defaults.label || '';
-          if (c === 1) input.value = defaults.tilt || '';
-        }
-        td.appendChild(input);
-        tr.appendChild(td);
-      }
-      return tr;
+    function vsmBuildGrid() {
+      const headRow = document.getElementById('vsmHead');
+      const tbody = document.getElementById('vsmGridBody');
+
+      // Save existing values
+      const oldVals = {};
+      tbody.querySelectorAll('input[data-row][data-col]').forEach((inp) => {
+        oldVals[`${inp.dataset.row}_${inp.dataset.col}`] = inp.value;
+      });
+
+      // Header
+      headRow.innerHTML = '<th class="group-vsm">Tilt</th><th class="group-vsm">Vis</th>';
+      vsmConditions.forEach((name, ci) => {
+        const th = document.createElement('th');
+        th.className = 'group-vsm';
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.value = name;
+        inp.className = 'vsm-col-header';
+        inp.addEventListener('change', () => { vsmConditions[ci] = inp.value; });
+        th.appendChild(inp);
+        headRow.appendChild(th);
+      });
+
+      // Body
+      tbody.innerHTML = '';
+      VSM_FIXED_ROWS.forEach((fr, ri) => {
+        const tr = document.createElement('tr');
+        const tdTilt = document.createElement('td');
+        tdTilt.textContent = String(fr.tilt);
+        tdTilt.className = 'vsm-fixed';
+        tr.appendChild(tdTilt);
+        const tdVis = document.createElement('td');
+        tdVis.textContent = String(fr.vis);
+        tdVis.className = 'vsm-fixed';
+        tr.appendChild(tdVis);
+
+        vsmConditions.forEach((_, ci) => {
+          const td = document.createElement('td');
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.dataset.row = String(ri);
+          inp.dataset.col = String(ci);
+          const key = `${ri}_${ci}`;
+          if (oldVals[key]) inp.value = oldVals[key];
+          td.appendChild(inp);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
     }
 
-    function vsmInit() {
-      const body = document.getElementById('vsmGridBody');
-      VSM_DEFAULTS.forEach((def, i) => body.appendChild(vsmCreateRow(i, def)));
+    function vsmAddCol() {
+      vsmConditions.push(`Condition ${vsmConditions.length + 1}`);
+      vsmBuildGrid();
     }
 
-    function vsmAddRow() {
-      const body = document.getElementById('vsmGridBody');
-      body.appendChild(vsmCreateRow(body.children.length, null));
+    function vsmRemoveCol() {
+      if (vsmConditions.length <= 1) return;
+      vsmConditions.pop();
+      vsmBuildGrid();
     }
 
     function vsmClearGrid() {
-      // Clear only the data columns (grey + 6 rooms), keep labels and tilts
-      document.querySelectorAll('#vsmGridBody input').forEach((input) => {
-        const col = Number(input.dataset.col);
-        if (col >= 2) input.value = '';
-      });
+      document.querySelectorAll('#vsmGridBody input').forEach((inp) => { inp.value = ''; });
     }
 
     function vsmHandlePaste(event) {
@@ -932,64 +945,27 @@
       const lines = pasted.replace(/\r/g, '').split('\n').filter((l) => l.length > 0);
       const matrix = lines.map((l) => l.split('\t'));
 
-      const neededRows = rowStart + matrix.length;
-      const currentRows = document.querySelectorAll('#vsmGridBody tr').length;
-      if (neededRows > currentRows) {
-        for (let i = currentRows; i < neededRows + 2; i++) vsmAddRow();
-      }
-
       matrix.forEach((cells, rOff) => {
         cells.forEach((val, cOff) => {
+          const r = rowStart + rOff;
           const c = colStart + cOff;
-          if (c >= VSM_COLS) return;
-          const cell = document.querySelector(`#vsmGridBody input[data-row="${rowStart + rOff}"][data-col="${c}"]`);
-          if (cell) cell.value = val.trim();
+          if (r >= VSM_FIXED_ROWS.length || c >= vsmConditions.length) return;
+          const inp = document.querySelector(`#vsmGridBody input[data-row="${r}"][data-col="${c}"]`);
+          if (inp) inp.value = val.trim();
         });
       });
     }
 
-    /* Collect rows: {label, tilt, pu[6]} */
-    function vsmCollectRows() {
-      const rows = [...document.querySelectorAll('#vsmGridBody tr')];
-      const result = [];
-
-      rows.forEach((row) => {
-        const cells = [...row.querySelectorAll('input')];
-        if (cells.length < VSM_COLS) return;
-        const label = cells[0].value.trim() || `Row ${result.length + 1}`;
-        const tilt = parseNumber(cells[1].value);
-        if (tilt === null) return;
-
-        // Cols 3-8 are room_0 through room_300 (skip col 2 = grey)
-        const pu = [];
-        let hasData = false;
-        for (let i = 0; i < 6; i++) {
-          const v = parseNumber(cells[i + 3].value);
-          pu.push(v);
-          if (v !== null) hasData = true;
-        }
-        if (!hasData) return;
-        result.push({ label, tilt, pu });
-      });
-
-      return result;
-    }
-
-    /* Predict PU using vector sum model (Dyde et al., 2006) */
-    function vsmPredict(tiltDeg, visDeg, vis1, vis2, vis3, bod) {
+    /* Predict PU: 2-parameter model (v = visual weight, b = body weight, g = 1 fixed) */
+    function vsmPredict(tiltDeg, visDeg, v, b) {
       const g = 1;
       const tilt = tiltDeg * DEG2RAD;
-      const v = visDeg * DEG2RAD;
-
-      const vy = vis1 * Math.cos(v) + vis2 * Math.cos(2 * v) + vis3 * Math.cos(4 * v);
-      const vx = vis1 * Math.sin(v) + vis2 * Math.sin(2 * v) + vis3 * Math.sin(4 * v);
-
-      const y = bod + vy + g * Math.cos(tilt);
-      const x = vx + g * Math.sin(tilt);
+      const vis = visDeg * DEG2RAD;
+      const x = v * Math.sin(vis) + g * Math.sin(tilt);
+      const y = b + v * Math.cos(vis) + g * Math.cos(tilt);
       return Math.atan2(x, y) * RAD2DEG;
     }
 
-    /* Angular difference handling wrapping */
     function angleDiff(a, b) {
       let d = a - b;
       while (d > 180) d -= 360;
@@ -997,83 +973,63 @@
       return d;
     }
 
-    /* SSE for vector sum model */
-    function vsmSSE(dataPoints, vis1, vis2, vis3, bod) {
+    function vsmSSE(dataPoints, v, b) {
       let err = 0;
       for (const dp of dataPoints) {
-        const pred = vsmPredict(dp.tilt, dp.vis, vis1, vis2, vis3, bod);
+        const pred = vsmPredict(dp.tilt, dp.vis, v, b);
         const d = angleDiff(pred, dp.actualPU);
         err += d * d;
       }
       return err;
     }
 
-    /* R-squared for vector sum model */
-    function vsmRSquared(dataPoints, vis1, vis2, vis3, bod) {
-      const meanPU = dataPoints.reduce((s, dp) => s + dp.actualPU, 0) / dataPoints.length;
-      let ssRes = 0, ssTot = 0;
-      for (const dp of dataPoints) {
-        const pred = vsmPredict(dp.tilt, dp.vis, vis1, vis2, vis3, bod);
-        ssRes += angleDiff(pred, dp.actualPU) ** 2;
-        ssTot += angleDiff(dp.actualPU, meanPU) ** 2;
-      }
-      return ssTot === 0 ? NaN : 1 - ssRes / ssTot;
-    }
+    /* Fit v, b using coarse grid + gradient descent + hill climbing */
+    function fitVSM(dataPoints) {
+      let bestErr = Infinity, bestV = 0, bestB = 1;
 
-    /* Fit the vector sum model using coarse grid search + hill climbing */
-    function fitVectorSum(dataPoints) {
-      let bestErr = Infinity;
-      let bestVis1 = 0, bestVis2 = 0, bestVis3 = 0, bestBod = 1;
-
-      // Coarse grid search
-      for (let vis1 = -1.5; vis1 <= 1.5; vis1 += 0.15) {
-        for (let vis2 = -0.8; vis2 <= 0.8; vis2 += 0.2) {
-          for (let vis3 = -0.5; vis3 <= 0.5; vis3 += 0.2) {
-            for (let bod = -1; bod <= 4; bod += 0.25) {
-              const err = vsmSSE(dataPoints, vis1, vis2, vis3, bod);
-              if (err < bestErr) {
-                bestErr = err;
-                bestVis1 = vis1;
-                bestVis2 = vis2;
-                bestVis3 = vis3;
-                bestBod = bod;
-              }
-            }
-          }
+      // Coarse grid
+      for (let v = -2; v <= 2; v += 0.05) {
+        for (let b = -2; b <= 8; b += 0.1) {
+          const err = vsmSSE(dataPoints, v, b);
+          if (err < bestErr) { bestErr = err; bestV = v; bestB = b; }
         }
       }
 
-      // Hill-climbing refinement
-      let step = 0.1;
-      while (step > 1e-5) {
+      // Gradient descent with adaptive step
+      let lr = 0.0001;
+      for (let iter = 0; iter < 50000; iter++) {
+        const h = 1e-7;
+        const f0 = vsmSSE(dataPoints, bestV, bestB);
+        const gv = (vsmSSE(dataPoints, bestV + h, bestB) - f0) / h;
+        const gb = (vsmSSE(dataPoints, bestV, bestB + h) - f0) / h;
+        const nV = bestV - lr * gv;
+        const nB = bestB - lr * gb;
+        const nErr = vsmSSE(dataPoints, nV, nB);
+        if (nErr < bestErr) { bestErr = nErr; bestV = nV; bestB = nB; lr *= 1.05; }
+        else { lr *= 0.5; }
+        if (lr < 1e-15) break;
+      }
+
+      // Final hill-climbing polish
+      let step = 0.001;
+      while (step > 1e-9) {
         let improved = false;
-        for (const d1 of [0, -step, step]) {
-          for (const d2 of [0, -step, step]) {
-            for (const d3 of [0, -step, step]) {
-              for (const db of [0, -step, step]) {
-                if (d1 === 0 && d2 === 0 && d3 === 0 && db === 0) continue;
-                const cV1 = bestVis1 + d1;
-                const cV2 = bestVis2 + d2;
-                const cV3 = bestVis3 + d3;
-                const cB = bestBod + db;
-                const err = vsmSSE(dataPoints, cV1, cV2, cV3, cB);
-                if (err < bestErr) {
-                  bestErr = err;
-                  bestVis1 = cV1;
-                  bestVis2 = cV2;
-                  bestVis3 = cV3;
-                  bestBod = cB;
-                  improved = true;
-                }
-              }
-            }
+        for (const dv of [0, -step, step]) {
+          for (const db of [0, -step, step]) {
+            if (dv === 0 && db === 0) continue;
+            const err = vsmSSE(dataPoints, bestV + dv, bestB + db);
+            if (err < bestErr) { bestErr = err; bestV += dv; bestB += db; improved = true; }
           }
         }
         if (!improved) step /= 2;
       }
 
-      const r2 = vsmRSquared(dataPoints, bestVis1, bestVis2, bestVis3, bestBod);
-      return { vis1: bestVis1, vis2: bestVis2, vis3: bestVis3, bod: bestBod, r2, sse: bestErr, n: dataPoints.length };
+      const mean = dataPoints.reduce((s, dp) => s + dp.actualPU, 0) / dataPoints.length;
+      let ssTot = 0;
+      for (const dp of dataPoints) ssTot += angleDiff(dp.actualPU, mean) ** 2;
+      const r2 = ssTot === 0 ? NaN : 1 - bestErr / ssTot;
+
+      return { v: bestV, b: bestB, r2, sse: bestErr, n: dataPoints.length };
     }
 
     /* Draw predicted vs actual scatter plot */
@@ -1090,22 +1046,22 @@
       ctx.fillRect(0, 0, W, H);
 
       const actuals = dataPoints.map((dp) => dp.actualPU);
-      const predicteds = dataPoints.map((dp) => vsmPredict(dp.tilt, dp.vis, fit.vis1, fit.vis2, fit.vis3, fit.bod));
+      const predicteds = dataPoints.map((dp) => vsmPredict(dp.tilt, dp.vis, fit.v, fit.b));
       const all = actuals.concat(predicteds);
       const dMin = Math.min(...all) - 5;
       const dMax = Math.max(...all) + 5;
 
-      function toX(v) { return pad.left + ((v - dMin) / (dMax - dMin)) * plotW; }
-      function toY(v) { return pad.top + plotH - ((v - dMin) / (dMax - dMin)) * plotH; }
+      function toX(val) { return pad.left + ((val - dMin) / (dMax - dMin)) * plotW; }
+      function toY(val) { return pad.top + plotH - ((val - dMin) / (dMax - dMin)) * plotH; }
 
       // Grid lines
       ctx.strokeStyle = '#e5e7eb';
       ctx.lineWidth = 1;
       const ticks = 6;
       for (let i = 0; i <= ticks; i++) {
-        const v = dMin + (dMax - dMin) * (i / ticks);
-        ctx.beginPath(); ctx.moveTo(pad.left, toY(v)); ctx.lineTo(W - pad.right, toY(v)); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(toX(v), pad.top); ctx.lineTo(toX(v), pad.top + plotH); ctx.stroke();
+        const val = dMin + (dMax - dMin) * (i / ticks);
+        ctx.beginPath(); ctx.moveTo(pad.left, toY(val)); ctx.lineTo(W - pad.right, toY(val)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(toX(val), pad.top); ctx.lineTo(toX(val), pad.top + plotH); ctx.stroke();
       }
 
       // Axes
@@ -1117,7 +1073,7 @@
       ctx.lineTo(W - pad.right, pad.top + plotH);
       ctx.stroke();
 
-      // Identity line (perfect fit)
+      // Identity line
       ctx.strokeStyle = '#9ca3af';
       ctx.lineWidth = 1;
       ctx.setLineDash([5, 5]);
@@ -1132,13 +1088,13 @@
       ctx.font = '12px Arial';
       ctx.textAlign = 'center';
       for (let i = 0; i <= ticks; i++) {
-        const v = dMin + (dMax - dMin) * (i / ticks);
-        ctx.fillText(v.toFixed(1), toX(v), pad.top + plotH + 18);
+        const val = dMin + (dMax - dMin) * (i / ticks);
+        ctx.fillText(val.toFixed(1), toX(val), pad.top + plotH + 18);
       }
       ctx.textAlign = 'right';
       for (let i = 0; i <= ticks; i++) {
-        const v = dMin + (dMax - dMin) * (i / ticks);
-        ctx.fillText(v.toFixed(1), pad.left - 8, toY(v) + 4);
+        const val = dMin + (dMax - dMin) * (i / ticks);
+        ctx.fillText(val.toFixed(1), pad.left - 8, toY(val) + 4);
       }
 
       // Axis titles
@@ -1151,27 +1107,18 @@
       ctx.fillText('Predicted PU (°)', 0, 0);
       ctx.restore();
 
-      // Color by vis orientation
+      // Color by vis
       const visColors = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777'];
 
-      // Data points - circle for tilt=0, triangle for tilt=-90
+      // Points: circle for tilt=0, triangle for tilt=-90
       dataPoints.forEach((dp, i) => {
-        const actual = dp.actualPU;
-        const pred = predicteds[i];
-        const cx = toX(actual);
-        const cy = toY(pred);
+        const cx = toX(dp.actualPU);
+        const cy = toY(predicteds[i]);
         ctx.fillStyle = visColors[dp.visIdx];
         if (dp.tilt === 0) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
         } else {
-          ctx.beginPath();
-          ctx.moveTo(cx, cy - 6);
-          ctx.lineTo(cx - 5, cy + 4);
-          ctx.lineTo(cx + 5, cy + 4);
-          ctx.closePath();
-          ctx.fill();
+          ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx - 5, cy + 4); ctx.lineTo(cx + 5, cy + 4); ctx.closePath(); ctx.fill();
         }
       });
 
@@ -1185,21 +1132,16 @@
       ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
       ctx.fillStyle = '#6b7280';
       ctx.textAlign = 'left';
-      ctx.fillText(`vis1=${fit.vis1.toFixed(4)}  vis2=${fit.vis2.toFixed(4)}  vis3=${fit.vis3.toFixed(4)}  bod=${fit.bod.toFixed(4)}  R²=${fit.r2.toFixed(4)}`, pad.left + 5, pad.top + 15);
+      ctx.fillText(`v=${fit.v.toFixed(4)}  b=${fit.b.toFixed(4)}  R²=${fit.r2.toFixed(4)}`, pad.left + 5, pad.top + 15);
 
       // Legend
       const legendY = pad.top + 28;
-      VSM_ROOM_NAMES.forEach((name, i) => {
+      VSM_VIS_ANGLES.forEach((angle, i) => {
         ctx.fillStyle = visColors[i];
-        ctx.beginPath();
-        ctx.arc(pad.left + 12, legendY + i * 15, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#374151';
-        ctx.font = '10px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(name, pad.left + 22, legendY + i * 15 + 3);
+        ctx.beginPath(); ctx.arc(pad.left + 12, legendY + i * 15, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#374151'; ctx.font = '10px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(`vis ${angle}°`, pad.left + 22, legendY + i * 15 + 3);
       });
-      // Shape legend
       const shapeY = legendY + 6 * 15 + 5;
       ctx.fillStyle = '#374151';
       ctx.beginPath(); ctx.arc(pad.left + 12, shapeY, 4, 0, Math.PI * 2); ctx.fill();
@@ -1215,68 +1157,46 @@
       msg.textContent = '';
 
       try {
-        const rows = vsmCollectRows();
-        if (rows.length === 0) throw new Error('No valid rows found. Enter tilt and at least one PU value per row.');
+        const condResults = [];
 
-        // Separate upright (tilt=0) and RSD (tilt!=0) rows
-        const uprightRows = rows.filter((r) => r.tilt === 0);
-        const rsdRows = rows.filter((r) => r.tilt !== 0);
-
-        if (uprightRows.length === 0) throw new Error('No Upright (tilt = 0°) rows found.');
-        if (rsdRows.length === 0) throw new Error('No RSD (tilt ≠ 0°) rows found.');
-
-        // Build pairs: each upright × each RSD
-        const pairResults = [];
-
-        for (const uRow of uprightRows) {
-          for (const rRow of rsdRows) {
-            const dataPoints = [];
-
-            // 6 data points from upright row (tilt=0)
-            for (let i = 0; i < 6; i++) {
-              if (uRow.pu[i] !== null) {
-                dataPoints.push({ tilt: uRow.tilt, vis: VSM_VIS_ANGLES[i], visIdx: i, actualPU: uRow.pu[i] });
-              }
-            }
-            // 6 data points from RSD row
-            for (let i = 0; i < 6; i++) {
-              if (rRow.pu[i] !== null) {
-                dataPoints.push({ tilt: rRow.tilt, vis: VSM_VIS_ANGLES[i], visIdx: i, actualPU: rRow.pu[i] });
-              }
-            }
-
-            if (dataPoints.length < 4) continue;
-
-            const fit = fitVectorSum(dataPoints);
-            const pairLabel = `${uRow.label} × ${rRow.label}`;
-            pairResults.push({ pairLabel, fit, dataPoints, uLabel: uRow.label, rLabel: rRow.label });
+        for (let ci = 0; ci < vsmConditions.length; ci++) {
+          const dataPoints = [];
+          for (let ri = 0; ri < VSM_FIXED_ROWS.length; ri++) {
+            const inp = document.querySelector(`#vsmGridBody input[data-row="${ri}"][data-col="${ci}"]`);
+            if (!inp) continue;
+            const val = parseNumber(inp.value);
+            if (val === null) continue;
+            const visIdx = ri < 6 ? ri : ri - 6;
+            dataPoints.push({ tilt: VSM_FIXED_ROWS[ri].tilt, vis: VSM_FIXED_ROWS[ri].vis, visIdx, actualPU: val });
           }
+          if (dataPoints.length < 2) continue;
+
+          const fit = fitVSM(dataPoints);
+          condResults.push({ name: vsmConditions[ci], fit, dataPoints });
         }
 
-        if (pairResults.length === 0) throw new Error('No valid pairs could be formed. Each pair needs at least 4 data points.');
+        if (condResults.length === 0) throw new Error('No conditions with enough data (need at least 2 values per condition).');
 
-        // === Summary table: all pairs side by side ===
-        const pairLabels = pairResults.map((p) => p.pairLabel);
-        const summaryHTML = renderBlock('Fitted Parameters (g = 1.0 fixed)', pairLabels, [
-          { label: 'vis1 (1st harmonic)', values: pairResults.map((p) => p.fit.vis1.toFixed(6)) },
-          { label: 'vis2 (2nd harmonic)', values: pairResults.map((p) => p.fit.vis2.toFixed(6)) },
-          { label: 'vis3 (4th harmonic)', values: pairResults.map((p) => p.fit.vis3.toFixed(6)) },
-          { label: 'bod (body weight)', values: pairResults.map((p) => p.fit.bod.toFixed(6)) },
-          { label: 'R²', values: pairResults.map((p) => p.fit.r2.toFixed(6)) },
-          { label: 'SSE', values: pairResults.map((p) => p.fit.sse.toFixed(6)) },
-          { label: 'n', values: pairResults.map((p) => String(p.fit.n)) },
+        // === v/b summary table (matches user's expected format) ===
+        const condNames = condResults.map((cr) => cr.name + ' Vector Sum');
+        const summaryHTML = renderBlock('Vector Sum Model', condNames, [
+          { label: 'v', values: condResults.map((cr) => cr.fit.v.toFixed(4)) },
+          { label: 'b', values: condResults.map((cr) => cr.fit.b.toFixed(4)) },
+          { label: 'R²', values: condResults.map((cr) => cr.fit.r2.toFixed(4)) },
+          { label: 'SSE', values: condResults.map((cr) => cr.fit.sse.toFixed(4)) },
+          { label: 'n', values: condResults.map((cr) => String(cr.fit.n)) },
         ]);
 
-        // === Per-pair predicted vs actual tables ===
+        // === Per-condition predicted vs actual tables ===
         let compHTML = '';
-        for (const pr of pairResults) {
-          let tbl = `<div class="result-block"><h4>${pr.pairLabel}</h4><table class="result-table"><thead><tr><th>Tilt</th><th>Vis</th><th>Actual</th><th>Predicted</th><th>Error</th></tr></thead><tbody>`;
-          const copyLines = [`${pr.pairLabel}`, 'Tilt\tVis\tActual\tPredicted\tError'];
-          for (const dp of pr.dataPoints) {
-            const pred = vsmPredict(dp.tilt, dp.vis, pr.fit.vis1, pr.fit.vis2, pr.fit.vis3, pr.fit.bod);
+        for (const cr of condResults) {
+          let tbl = `<div class="result-block"><h4>${cr.name} Vector Sum</h4><table class="result-table"><thead><tr><th>Tilt</th><th>Vis</th><th>Actual</th><th>Predicted</th><th>Error</th></tr></thead><tbody>`;
+          const copyLines = [`${cr.name} Vector Sum`, 'Tilt\tVis\tActual\tPredicted\tError'];
+          for (const dp of cr.dataPoints) {
+            const pred = vsmPredict(dp.tilt, dp.vis, cr.fit.v, cr.fit.b);
             const err = angleDiff(pred, dp.actualPU);
-            tbl += `<tr><td>${dp.tilt}</td><td>${dp.vis}</td><td>${dp.actualPU.toFixed(2)}</td><td>${pred.toFixed(2)}</td><td>${err.toFixed(2)}</td></tr>`;
-            copyLines.push(`${dp.tilt}\t${dp.vis}\t${dp.actualPU.toFixed(2)}\t${pred.toFixed(2)}\t${err.toFixed(2)}`);
+            tbl += `<tr><td>${dp.tilt}</td><td>${dp.vis}</td><td>${dp.actualPU.toFixed(4)}</td><td>${pred.toFixed(4)}</td><td>${err.toFixed(4)}</td></tr>`;
+            copyLines.push(`${dp.tilt}\t${dp.vis}\t${dp.actualPU.toFixed(4)}\t${pred.toFixed(4)}\t${err.toFixed(4)}`);
           }
           tbl += '</tbody></table>';
           tbl += `<textarea class="copy-area" readonly>${copyLines.join('\n')}</textarea></div>`;
@@ -1287,14 +1207,14 @@
 
         // === Charts ===
         let chartsHTML = '';
-        pairResults.forEach((pr, idx) => {
-          chartsHTML += `<div class="chart-card"><h4>${pr.pairLabel}</h4><canvas id="vsmCanvas_${idx}" width="520" height="420"></canvas></div>`;
+        condResults.forEach((cr, idx) => {
+          chartsHTML += `<div class="chart-card"><h4>${cr.name} Vector Sum</h4><canvas id="vsmCanvas_${idx}" width="520" height="420"></canvas></div>`;
         });
-        chartsDiv.innerHTML = chartsHTML || 'No charts.';
+        chartsDiv.innerHTML = chartsHTML || 'No figures yet.';
 
-        pairResults.forEach((pr, idx) => {
+        condResults.forEach((cr, idx) => {
           const canvas = document.getElementById(`vsmCanvas_${idx}`);
-          if (canvas) drawVsmChart(canvas, pr.dataPoints, pr.fit, pr.pairLabel);
+          if (canvas) drawVsmChart(canvas, cr.dataPoints, cr.fit, cr.name + ' Vector Sum');
         });
 
       } catch (error) {
@@ -1304,9 +1224,10 @@
       }
     }
 
-    vsmInit();
+    vsmBuildGrid();
     document.getElementById('vsmGridBody').addEventListener('paste', vsmHandlePaste);
-    document.getElementById('vsmAddRow').addEventListener('click', vsmAddRow);
+    document.getElementById('vsmAddCol').addEventListener('click', vsmAddCol);
+    document.getElementById('vsmRemoveCol').addEventListener('click', vsmRemoveCol);
     document.getElementById('vsmClearGrid').addEventListener('click', vsmClearGrid);
     document.getElementById('vsmRun').addEventListener('click', runVectorSumModel);
   </script>
