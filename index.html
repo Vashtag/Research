@@ -349,7 +349,8 @@
 
       let stepB = 5;
       let stepX0 = 5;
-      while (stepB > 1e-4) {
+      let iterSig = 0;
+      while (stepB > 1e-4 && iterSig++ < 10000) {
         let improved = false;
         for (const db of [0, -stepB, stepB]) {
           for (const dx of [0, -stepX0, stepX0]) {
@@ -640,7 +641,8 @@
       let stepMu = (maxX - minX) * 0.1 || 1;
       let stepSig = (maxX - minX) * 0.1 || 1;
 
-      while (stepA > 1e-4 && stepMu > 1e-4 && stepSig > 1e-4) {
+      let iterGauss = 0;
+      while (stepA > 1e-4 && stepMu > 1e-4 && stepSig > 1e-4 && iterGauss++ < 10000) {
         let improved = false;
         for (const da of [0, -stepA, stepA]) {
           for (const dm of [0, -stepMu, stepMu]) {
