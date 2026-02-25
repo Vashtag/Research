@@ -350,7 +350,7 @@
       let stepB = 5;
       let stepX0 = 5;
       let iterSig = 0;
-      while (stepB > 1e-4 && iterSig++ < 10000) {
+      while (stepB > 1e-4 && iterSig++ < 1000) {
         let improved = false;
         for (const db of [0, -stepB, stepB]) {
           for (const dx of [0, -stepX0, stepX0]) {
@@ -642,7 +642,7 @@
       let stepSig = (maxX - minX) * 0.1 || 1;
 
       let iterGauss = 0;
-      while (stepA > 1e-4 && stepMu > 1e-4 && stepSig > 1e-4 && iterGauss++ < 10000) {
+      while (stepA > 1e-4 && stepMu > 1e-4 && stepSig > 1e-4 && iterGauss++ < 1000) {
         let improved = false;
         for (const da of [0, -stepA, stepA]) {
           for (const dm of [0, -stepMu, stepMu]) {
@@ -999,7 +999,8 @@
 
       // Hill-climbing refinement
       let step = 0.01;
-      while (step > 1e-6) {
+      let iterVSM = 0;
+      while (step > 1e-6 && iterVSM++ < 1000) {
         let improved = false;
         for (const dv of [0, -step, step]) {
           for (const db of [0, -step, step]) {
