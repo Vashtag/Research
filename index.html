@@ -323,6 +323,14 @@
       const minX = Math.min(...xs);
       const maxX = Math.max(...xs);
 
+      const ys = data.map(([, y]) => y);
+      const yMin = Math.min(...ys);
+      const yMax = Math.max(...ys);
+      const needsScale = yMin < 0 || yMax > 1;
+      const scaled = needsScale
+        ? data.map(([x, y]) => [x, (y - yMin) / (yMax - yMin)])
+        : data;
+
       let bestErr = Infinity;
       let bestB = direction === 'dp' ? 1 : -1;
       let bestX0 = 0;
@@ -338,7 +346,7 @@
         if (direction === 'dp' && !(b > 0)) continue;
 
         for (let x0 = x0Min; x0 <= x0Max; x0 += 1) {
-          const err = sse(data, b, x0);
+          const err = sse(scaled, b, x0);
           if (err < bestErr) {
             bestErr = err;
             bestB = b;
@@ -359,7 +367,7 @@
             if (direction === 'pd' && !(candB < 1)) continue;
             if (direction === 'dp' && !(candB > 0)) continue;
             const candX0 = bestX0 + dx;
-            const err = sse(data, candB, candX0);
+            const err = sse(scaled, candB, candX0);
             if (err < bestErr) {
               bestErr = err;
               bestB = candB;
@@ -374,7 +382,7 @@
         }
       }
 
-      return { b: bestB, x0: bestX0, r2: rSquared(data, bestB, bestX0), sse: bestErr, n: data.length };
+      return { b: bestB, x0: bestX0, r2: rSquared(scaled, bestB, bestX0), sse: bestErr, n: scaled.length };
     }
 
     function buildCopyTable(title, labels, rowsByMetric) {
